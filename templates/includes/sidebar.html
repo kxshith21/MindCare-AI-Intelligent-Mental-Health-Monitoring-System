@@ -1,0 +1,38 @@
+<aside class="app-sidebar" id="appSidebar">
+    <div class="sidebar-brand">
+        <span class="sidebar-logo"><i class="bi bi-heart-pulse-fill"></i></span>
+        <div>
+            <strong>{{ app_name }}</strong>
+            <small>AI Wellness</small>
+        </div>
+    </div>
+    <nav class="sidebar-nav">
+        <a href="{{ url_for('chat.workspace_page') }}" class="sidebar-link {% if active_nav == 'workspace' %}active{% endif %}">
+            <i class="bi bi-columns-gap"></i><span>Workspace</span>
+        </a>
+        <a href="{{ url_for('chat.workspace_page') }}#panelChat" class="sidebar-link">
+            <i class="bi bi-chat-heart-fill"></i><span>Chat</span>
+        </a>
+        <a href="{{ url_for('chat.workspace_page') }}#panelInsights" class="sidebar-link">
+            <i class="bi bi-activity"></i><span>Live insights</span>
+        </a>
+        <a href="{{ url_for('chat.workspace_page') }}#fullAnalytics" class="sidebar-link">
+            <i class="bi bi-graph-up"></i><span>Analytics</span>
+        </a>
+        <a href="{{ url_for('chat.workspace_page') }}#alerts" class="sidebar-link">
+            <i class="bi bi-shield-exclamation"></i><span>Alerts</span>
+            {% if alert_count %}<span class="sidebar-badge">{{ alert_count }}</span>{% endif %}
+        </a>
+        <a href="{{ url_for('chat.workspace_page') }}#history" class="sidebar-link">
+            <i class="bi bi-clock-history"></i><span>History</span>
+        </a>
+    </nav>
+    <div class="sidebar-footer">
+        <a href="{{ url_for('chat.index') }}" class="sidebar-link subtle">
+            <i class="bi bi-house"></i><span>Home</span>
+        </a>
+    </div>
+</aside>
+<button class="sidebar-toggle d-lg-none" id="sidebarToggle" aria-label="Toggle menu">
+    <i class="bi bi-list"></i>
+</button>

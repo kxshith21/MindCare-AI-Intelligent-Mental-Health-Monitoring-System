@@ -1,0 +1,164 @@
+{% extends "base_app.html" %}
+{% block title %}MindCare Workspace — {{ app_name }}{% endblock %}
+
+{% block extra_head %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+{% endblock %}
+
+{% block content %}
+<div class="workspace-header fade-in">
+    <div>
+        <h1 class="page-title">MindCare Workspace</h1>
+        <p class="page-subtitle">Chat and wellness insights — together in one place</p>
+    </div>
+    <button class="btn btn-soft" id="refreshLogs" type="button">
+        <i class="bi bi-arrow-clockwise"></i> Refresh insights
+    </button>
+</div>
+
+<div class="workspace-tabs d-xl-none" role="tablist">
+    <button type="button" class="workspace-tab active" data-panel="chat" role="tab">
+        <i class="bi bi-chat-heart-fill"></i> Chat
+    </button>
+    <button type="button" class="workspace-tab" data-panel="insights" role="tab">
+        <i class="bi bi-graph-up"></i> Insights
+    </button>
+</div>
+
+<div class="integrated-layout fade-in delay-1">
+    <!-- CHAT COLUMN -->
+    <section class="integrated-chat-col active" id="panelChat" aria-label="Chat">
+        {% include 'includes/chat_panel.html' %}
+    </section>
+
+    <!-- LIVE INSIGHTS COLUMN -->
+    <aside class="integrated-insights-col" id="panelInsights" aria-label="Wellness insights">
+        <div class="insights-sticky">
+            <div class="insights-header glass-panel">
+                <h2><i class="bi bi-activity"></i> Live insights</h2>
+                <p class="mb-0">Updates as you chat</p>
+            </div>
+
+            <div class="insights-wellness glass-panel">
+                <div class="wellness-ring-compact" style="--score: {{ wellness_score }}">
+                    <svg viewBox="0 0 80 80">
+                        <circle class="ring-bg" cx="40" cy="40" r="34"/>
+                        <circle class="ring-fill" cx="40" cy="40" r="34"/>
+                    </svg>
+                    <div class="ring-center-sm"><span id="wellnessScoreRing">{{ wellness_score }}</span></div>
+                </div>
+                <div>
+                    <div class="insights-wellness-label">Wellness score</div>
+                    <div class="insights-wellness-value"><span id="wellnessScore">{{ wellness_score }}</span>/100</div>
+                </div>
+            </div>
+
+            <div class="insights-stats">
+                <div class="insight-stat glass-panel">
+                    <span class="insight-stat-label">Chats</span>
+                    <span class="insight-stat-value" id="statTotal">—</span>
+                </div>
+                <div class="insight-stat glass-panel">
+                    <span class="insight-stat-label">Mood</span>
+                    <span class="insight-stat-value text-capitalize" id="statDominant">—</span>
+                </div>
+                <div class="insight-stat glass-panel">
+                    <span class="insight-stat-label">Alerts</span>
+                    <span class="insight-stat-value" id="statEmergency">—</span>
+                </div>
+            </div>
+
+            <div class="chart-panel glass-panel chart-panel-compact">
+                <h3>Emotion mix</h3>
+                <canvas id="emotionPieChart" height="140"></canvas>
+            </div>
+
+            <div class="insights-recent glass-panel">
+                <div class="d-flex justify-content-between align-items-center mb-2">
+                    <h3 class="mb-0">Recent</h3>
+                    <a href="#fullAnalytics" class="small text-decoration-none">See all</a>
+                </div>
+                <div id="insightsRecentList" class="insights-recent-list">
+                    {% for conv in recent_conversations[:5] %}
+                    <div class="insight-recent-item">
+                        <span class="emotion-badge emotion-{{ conv.detected_emotion }}">{{ conv.detected_emotion }}</span>
+                        <p>{{ conv.user_message[:50] }}{% if conv.user_message|length > 50 %}...{% endif %}</p>
+                    </div>
+                    {% else %}
+                    <p class="text-muted small mb-0">Start chatting to see history.</p>
+                    {% endfor %}
+                </div>
+            </div>
+        </div>
+    </aside>
+</div>
+
+<!-- FULL ANALYTICS (scroll below on desktop) -->
+<section id="fullAnalytics" class="integrated-analytics fade-in">
+    <h2 class="section-heading"><i class="bi bi-bar-chart-line"></i> Full analytics</h2>
+    <div class="row g-4 mb-4" id="overview">
+        <div class="col-lg-8">
+            <div class="chart-panel glass-panel">
+                <h3>Weekly emotion trends</h3>
+                <canvas id="emotionTrendChart" height="100"></canvas>
+            </div>
+        </div>
+        <div class="col-lg-4">
+            <div class="chart-panel glass-panel">
+                <h3>Risk timeline</h3>
+                <canvas id="riskTimelineChart" height="100"></canvas>
+            </div>
+        </div>
+        <div class="col-12">
+            <div class="chart-panel glass-panel">
+                <h3>Mood improvement trend</h3>
+                <canvas id="moodChart" height="80"></canvas>
+            </div>
+        </div>
+    </div>
+
+    <div id="alerts" class="mb-4">
+        <h2 class="section-heading"><i class="bi bi-bell"></i> Alerts</h2>
+        <div id="alertsContainer" class="alerts-grid">
+            {% if emergency_alerts %}
+                {% for alert in emergency_alerts %}
+                <div class="alert-card glass-panel">
+                    <div class="alert-card-top">
+                        <span class="alert-level">High risk</span>
+                        <span class="alert-time">{{ alert.timestamp[:16] }}</span>
+                    </div>
+                    <p class="alert-msg">{{ alert.user_message[:100] }}...</p>
+                </div>
+                {% endfor %}
+            {% else %}
+                <div class="empty-panel glass-panel"><i class="bi bi-shield-check"></i><p>No alerts</p></div>
+            {% endif %}
+        </div>
+    </div>
+
+    <div id="history">
+        <h2 class="section-heading"><i class="bi bi-clock-history"></i> Conversation history</h2>
+        <div class="history-grid" id="historyGrid">
+            {% for conv in recent_conversations %}
+            <article class="history-card glass-panel">
+                <div class="history-card-head">
+                    <span class="emotion-badge emotion-{{ conv.detected_emotion }}">{{ conv.detected_emotion }}</span>
+                    <time>{{ conv.timestamp[:16] }}</time>
+                </div>
+                <p class="history-user">"{{ conv.user_message[:80] }}..."</p>
+                <div class="history-foot">
+                    <span>Risk {{ "%.0f"|format(conv.suicide_risk_score * 100) }}%</span>
+                    {% if conv.emergency_flag %}<span class="flag-alert">Flagged</span>{% endif %}
+                </div>
+            </article>
+            {% endfor %}
+        </div>
+    </div>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/chat.js') }}"></script>
+<script src="{{ url_for('static', filename='js/dashboard.js') }}"></script>
+<script src="{{ url_for('static', filename='js/workspace.js') }}"></script>
+{% endblock %}

@@ -1,0 +1,153 @@
+{% extends "base_app.html" %}
+{% block title %}Dashboard — {{ app_name }}{% endblock %}
+
+{% block extra_head %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+{% endblock %}
+
+{% block content %}
+<div class="page-header fade-in">
+    <div>
+        <h1 class="page-title">Wellness Dashboard</h1>
+        <p class="page-subtitle">Analytics, alerts, and conversation insights</p>
+    </div>
+    <button class="btn btn-soft" id="refreshLogs"><i class="bi bi-arrow-clockwise"></i> Refresh</button>
+</div>
+
+<!-- Overview -->
+<section id="overview" class="dash-section fade-in">
+    <div class="row g-3 g-xl-4 mb-4">
+        <div class="col-sm-6 col-xl-3">
+            <div class="metric-card">
+                <div class="metric-icon blue"><i class="bi bi-chat-dots-fill"></i></div>
+                <div class="metric-body">
+                    <span class="metric-label">Total Chats</span>
+                    <span class="metric-value" id="statTotal">—</span>
+                </div>
+            </div>
+        </div>
+        <div class="col-sm-6 col-xl-3">
+            <div class="metric-card">
+                <div class="metric-icon lavender"><i class="bi bi-emoji-smile-fill"></i></div>
+                <div class="metric-body">
+                    <span class="metric-label">Dominant Emotion</span>
+                    <span class="metric-value text-capitalize" id="statDominant">—</span>
+                </div>
+            </div>
+        </div>
+        <div class="col-sm-6 col-xl-3">
+            <div class="metric-card">
+                <div class="metric-icon teal"><i class="bi bi-heart-pulse-fill"></i></div>
+                <div class="metric-body">
+                    <span class="metric-label">Wellness Score</span>
+                    <span class="metric-value"><span id="wellnessScore">{{ wellness_score }}</span><small>/100</small></span>
+                </div>
+            </div>
+        </div>
+        <div class="col-sm-6 col-xl-3">
+            <div class="metric-card">
+                <div class="metric-icon coral"><i class="bi bi-shield-exclamation"></i></div>
+                <div class="metric-body">
+                    <span class="metric-label">High-Risk Flags</span>
+                    <span class="metric-value" id="statEmergency">—</span>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="wellness-banner glass-panel">
+        <div class="wellness-ring-lg" style="--score: {{ wellness_score }}">
+            <svg viewBox="0 0 120 120"><circle class="ring-bg" cx="60" cy="60" r="52"/><circle class="ring-fill" cx="60" cy="60" r="52"/></svg>
+            <div class="ring-center"><span id="wellnessScoreRing">{{ wellness_score }}</span></div>
+        </div>
+        <div>
+            <h3>Your mental wellness snapshot</h3>
+            <p class="mb-0 text-muted">Based on conversation patterns, emotional tone, and risk signals.</p>
+        </div>
+    </div>
+</section>
+
+<!-- Analytics -->
+<section id="analytics" class="dash-section fade-in">
+    <h2 class="section-heading"><i class="bi bi-graph-up"></i> Analytics</h2>
+    <div class="row g-4">
+        <div class="col-lg-8">
+            <div class="chart-panel glass-panel">
+                <h3>Weekly emotion trends</h3>
+                <canvas id="emotionTrendChart" height="110"></canvas>
+            </div>
+        </div>
+        <div class="col-lg-4">
+            <div class="chart-panel glass-panel h-100">
+                <h3>Emotion distribution</h3>
+                <canvas id="emotionPieChart"></canvas>
+            </div>
+        </div>
+        <div class="col-lg-6">
+            <div class="chart-panel glass-panel">
+                <h3>Risk score timeline</h3>
+                <canvas id="riskTimelineChart" height="100"></canvas>
+            </div>
+        </div>
+        <div class="col-lg-6">
+            <div class="chart-panel glass-panel">
+                <h3>Mood improvement trend</h3>
+                <canvas id="moodChart" height="100"></canvas>
+            </div>
+        </div>
+    </div>
+</section>
+
+<!-- Alerts -->
+<section id="alerts" class="dash-section fade-in">
+    <h2 class="section-heading"><i class="bi bi-bell"></i> Alerts</h2>
+    <div id="alertsContainer" class="alerts-grid">
+        {% if emergency_alerts %}
+            {% for alert in emergency_alerts %}
+            <div class="alert-card glass-panel">
+                <div class="alert-card-top">
+                    <span class="alert-level">High risk</span>
+                    <span class="alert-time">{{ alert.timestamp[:16] }}</span>
+                </div>
+                <p class="alert-msg">{{ alert.user_message[:120] }}{% if alert.user_message|length > 120 %}...{% endif %}</p>
+                <div class="alert-score">Risk: {{ "%.0f"|format(alert.suicide_risk_score * 100) }}%</div>
+            </div>
+            {% endfor %}
+        {% else %}
+            <div class="empty-panel glass-panel">
+                <i class="bi bi-shield-check"></i>
+                <p>No high-risk alerts. That's a good sign.</p>
+            </div>
+        {% endif %}
+    </div>
+</section>
+
+<!-- History -->
+<section id="history" class="dash-section fade-in">
+    <h2 class="section-heading"><i class="bi bi-clock-history"></i> Conversation history</h2>
+    <div class="history-grid" id="historyGrid">
+        {% for conv in recent_conversations %}
+        <article class="history-card glass-panel">
+            <div class="history-card-head">
+                <span class="emotion-badge emotion-{{ conv.detected_emotion }}">{{ conv.detected_emotion }}</span>
+                <time>{{ conv.timestamp[:16] }}</time>
+            </div>
+            <p class="history-user">"{{ conv.user_message[:100] }}{% if conv.user_message|length > 100 %}...{% endif %}"</p>
+            <p class="history-bot">{{ conv.bot_response[:120] }}{% if conv.bot_response|length > 120 %}...{% endif %}</p>
+            <div class="history-foot">
+                <span>Risk {{ "%.0f"|format(conv.suicide_risk_score * 100) }}%</span>
+                {% if conv.emergency_flag %}<span class="flag-alert">Flagged</span>{% endif %}
+            </div>
+        </article>
+        {% else %}
+        <div class="empty-panel glass-panel col-12">
+            <i class="bi bi-chat-square-text"></i>
+            <p>No conversations yet. <a href="{{ url_for('chat.workspace_page') }}">Start chatting</a></p>
+        </div>
+        {% endfor %}
+    </div>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/dashboard.js') }}"></script>
+{% endblock %}

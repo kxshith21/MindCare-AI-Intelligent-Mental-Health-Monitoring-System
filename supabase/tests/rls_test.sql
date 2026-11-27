@@ -133,14 +133,14 @@ insert into public.conversations (id, patient_id) values
   ('aaaaaaa3-aaaa-aaaa-aaaa-aaaaaaaaaaaa', '55555555-5555-5555-5555-555555555555'),
   ('aaaaaaa4-aaaa-aaaa-aaaa-aaaaaaaaaaaa', '88888888-8888-8888-8888-888888888888');
 
-insert into public.messages (conversation_id, patient_id, sender, content) values
-  ('aaaaaaa1-aaaa-aaaa-aaaa-aaaaaaaaaaaa', '11111111-1111-1111-1111-111111111111', 'user',      'I have been feeling anxious lately'),
-  ('aaaaaaa1-aaaa-aaaa-aaaa-aaaaaaaaaaaa', '11111111-1111-1111-1111-111111111111', 'assistant', 'Thank you for sharing that. Can you tell me more?'),
-  ('aaaaaaa2-aaaa-aaaa-aaaa-aaaaaaaaaaaa', '22222222-2222-2222-2222-222222222222', 'user',      'Sleep has been rough'),
-  ('aaaaaaa3-aaaa-aaaa-aaaa-aaaaaaaaaaaa', '55555555-5555-5555-5555-555555555555', 'user',      'Full scope patient message'),
-  ('aaaaaaa3-aaaa-aaaa-aaaa-aaaaaaaaaaaa', '55555555-5555-5555-5555-555555555555', 'assistant', 'Full scope assistant reply'),
-  ('aaaaaaa4-aaaa-aaaa-aaaa-aaaaaaaaaaaa', '88888888-8888-8888-8888-888888888888', 'user',      'Message to be deleted'),
-  ('aaaaaaa4-aaaa-aaaa-aaaa-aaaaaaaaaaaa', '88888888-8888-8888-8888-888888888888', 'assistant', 'Reply to be deleted');
+insert into public.messages (conversation_id, patient_id, sender, content, prompt_version, model) values
+  ('aaaaaaa1-aaaa-aaaa-aaaa-aaaaaaaaaaaa', '11111111-1111-1111-1111-111111111111', 'user',      'I have been feeling anxious lately', null, null),
+  ('aaaaaaa1-aaaa-aaaa-aaaa-aaaaaaaaaaaa', '11111111-1111-1111-1111-111111111111', 'assistant', 'Thank you for sharing that. Can you tell me more?', 'chat_system_v1', 'test-model'),
+  ('aaaaaaa2-aaaa-aaaa-aaaa-aaaaaaaaaaaa', '22222222-2222-2222-2222-222222222222', 'user',      'Sleep has been rough', null, null),
+  ('aaaaaaa3-aaaa-aaaa-aaaa-aaaaaaaaaaaa', '55555555-5555-5555-5555-555555555555', 'user',      'Full scope patient message', null, null),
+  ('aaaaaaa3-aaaa-aaaa-aaaa-aaaaaaaaaaaa', '55555555-5555-5555-5555-555555555555', 'assistant', 'Full scope assistant reply', 'chat_system_v1', 'test-model'),
+  ('aaaaaaa4-aaaa-aaaa-aaaa-aaaaaaaaaaaa', '88888888-8888-8888-8888-888888888888', 'user',      'Message to be deleted', null, null),
+  ('aaaaaaa4-aaaa-aaaa-aaaa-aaaaaaaaaaaa', '88888888-8888-8888-8888-888888888888', 'assistant', 'Reply to be deleted', 'chat_system_v1', 'test-model');
 
 -- risk events (API/service-role rows)
 insert into public.risk_events (patient_id, message_id, level, reason, status) values

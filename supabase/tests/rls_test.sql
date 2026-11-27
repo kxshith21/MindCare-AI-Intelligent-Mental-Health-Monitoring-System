@@ -1,5 +1,5 @@
 -- ============================================================================
--- MindCare AI — Phase 2 RLS test suite (scripted SQL, no pgTAP required)
+-- MindCare AI — RLS + consent test suite (scripted SQL, no pgTAP required)
 --
 -- Run against a FRESHLY RESET local database:
 --   supabase db reset
@@ -9,7 +9,7 @@
 --
 -- Every assertion prints "PASS: ...". Any failure raises SQLSTATE TSTFL and
 -- aborts the script (ON_ERROR_STOP=1), so a clean run ends with
--- "=== ALL 13 RLS SCENARIOS PASSED ===".
+-- "=== ALL 14 RLS SCENARIOS PASSED ===".
 --
 -- Sessions impersonate users with:
 --   set_config('role', <role>, true)          -- applies RLS
@@ -71,6 +71,7 @@ grant execute on function _test.t_expect_fail(text, text) to anon, authenticated
 --   pE 8888..  active link w/ psych3 (delete_my_data target)
 --   psychV 3333..  verified    psychU 4444..  UNVERIFIED
 --   psych3 7777..  verified, no seed links
+--   consent fixtures cccc/dddd/eeee: signup metadata propagation (test 14)
 -- ============================================================================
 insert into auth.users (
   instance_id, id, aud, role, email, encrypted_password, email_confirmed_at,
@@ -749,9 +750,119 @@ begin
 end $test$;
 
 -- ============================================================================
+-- TEST 14 — consent metadata propagation + immutability (Phase 5)
+-- ============================================================================
+-- signup simulations (as postgres — GoTrue runs server-side; consent is never
+-- enforced, so seed/server-created accounts keep NULL columns)
 do $test$
 begin
-  raise notice '=== ALL 13 RLS SCENARIOS PASSED ===';
+  insert into auth.users (
+    instance_id, id, aud, role, email, encrypted_password, email_confirmed_at,
+    raw_app_meta_data, raw_user_meta_data, created_at, updated_at
+  ) values (
+    '00000000-0000-0000-0000-000000000000', 'cccccccc-cccc-cccc-cccc-cccccccccccc',
+    'authenticated', 'authenticated', 'consent.full@demo.test',
+    extensions.crypt('demo-password-123', extensions.gen_salt('bf')), now(),
+    '{"provider":"email","providers":["email"]}',
+    '{"display_name":"Consent Full","region":"CA","terms_accepted":true,"privacy_accepted":true,"crisis_notice_acknowledged":true,"consent_document_version":"  consent-v2  ","age_18_plus":true}', now(), now());
+
+  perform _test.t_eq('14.1 consent_at stamped when all three flags are true', 'true',
+    (select (consent_at is not null)::text from public.profiles
+      where id = 'cccccccc-cccc-cccc-cccc-cccccccccccc'::uuid));
+  perform _test.t_eq('14.2 consent_document_version trimmed from metadata', 'consent-v2',
+    (select consent_version from public.profiles
+      where id = 'cccccccc-cccc-cccc-cccc-cccccccccccc'::uuid));
+  perform _test.t_eq('14.3 age_confirmed_at stamped for age_18_plus', 'true',
+    (select (age_confirmed_at is not null)::text from public.profiles
+      where id = 'cccccccc-cccc-cccc-cccc-cccccccccccc'::uuid));
+
+  insert into auth.users (
+    instance_id, id, aud, role, email, encrypted_password, email_confirmed_at,
+    raw_app_meta_data, raw_user_meta_data, created_at, updated_at
+  ) values (
+    '00000000-0000-0000-0000-000000000000', 'dddddddd-dddd-dddd-dddd-dddddddddddd',
+    'authenticated', 'authenticated', 'consent.blank-version@demo.test',
+    extensions.crypt('demo-password-123', extensions.gen_salt('bf')), now(),
+    '{"provider":"email","providers":["email"]}',
+    '{"display_name":"Consent Blank Version","terms_accepted":true,"privacy_accepted":true,"crisis_notice_acknowledged":true,"consent_document_version":"   ","age_18_plus":false}', now(), now());
+
+  perform _test.t_eq('14.4 blank consent_document_version uses draft fallback', 'draft-2026-11-27',
+    (select consent_version from public.profiles
+      where id = 'dddddddd-dddd-dddd-dddd-dddddddddddd'::uuid));
+  perform _test.t_eq('14.5 no age confirmation without age_18_plus', 'true',
+    (select (age_confirmed_at is null)::text from public.profiles
+      where id = 'dddddddd-dddd-dddd-dddd-dddddddddddd'::uuid));
+
+  insert into auth.users (
+    instance_id, id, aud, role, email, encrypted_password, email_confirmed_at,
+    raw_app_meta_data, raw_user_meta_data, created_at, updated_at
+  ) values (
+    '00000000-0000-0000-0000-000000000000', 'eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee',
+    'authenticated', 'authenticated', 'consent.partial@demo.test',
+    extensions.crypt('demo-password-123', extensions.gen_salt('bf')), now(),
+    '{"provider":"email","providers":["email"]}',
+    '{"display_name":"Consent Partial","terms_accepted":true,"privacy_accepted":true,"crisis_notice_acknowledged":false,"age_18_plus":true}', now(), now());
+
+  perform _test.t_eq('14.6 partial consent leaves consent_at NULL', 'true',
+    (select (consent_at is null)::text from public.profiles
+      where id = 'eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee'::uuid));
+  perform _test.t_eq('14.7 partial consent leaves consent_version NULL', 'true',
+    (select (consent_version is null)::text from public.profiles
+      where id = 'eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee'::uuid));
+  perform _test.t_eq('14.8 age flag is independent of consent', 'true',
+    (select (age_confirmed_at is not null)::text from public.profiles
+      where id = 'eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee'::uuid));
+
+  perform _test.t_eq('14.9 seed users are not blocked by missing consent', 'true',
+    (select (consent_at is null and consent_version is null and age_confirmed_at is null)::text
+       from public.profiles where id = '11111111-1111-1111-1111-111111111111'::uuid));
+  perform _test.t_eq('14.10 server-created psychologist needs no consent metadata', 'true',
+    (select (consent_at is null and consent_version is null and age_confirmed_at is null)::text
+       from public.profiles where id = '10101010-1010-1010-1010-101010101010'::uuid));
+end $test$;
+
+do $test$
+begin
+  perform set_config('role', 'authenticated', true);
+  perform set_config('request.jwt.claims',
+    '{"sub":"cccccccc-cccc-cccc-cccc-cccccccccccc","role":"authenticated"}', true);
+
+  perform _test.t_expect_fail('14.11 client cannot change consent_at',
+    $$update public.profiles set consent_at = null
+       where id = 'cccccccc-cccc-cccc-cccc-cccccccccccc'::uuid$$);
+  perform _test.t_expect_fail('14.12 client cannot change consent_version',
+    $$update public.profiles set consent_version = 'tampered'
+       where id = 'cccccccc-cccc-cccc-cccc-cccccccccccc'::uuid$$);
+  perform _test.t_expect_fail('14.13 client cannot change age_confirmed_at',
+    $$update public.profiles set age_confirmed_at = null
+       where id = 'cccccccc-cccc-cccc-cccc-cccccccccccc'::uuid$$);
+
+  update public.profiles
+     set display_name = 'Consent Full Renamed', region = 'gb'
+   where id = 'cccccccc-cccc-cccc-cccc-cccccccccccc'::uuid;
+  perform _test.t_eq('14.14 CONTROL: display_name/region remain editable', 'Consent Full Renamed|GB',
+    (select display_name || '|' || coalesce(region, '<null>') from public.profiles
+      where id = 'cccccccc-cccc-cccc-cccc-cccccccccccc'::uuid));
+end $test$;
+
+-- trusted SQL bypasses column grants, so this proves the trigger itself
+do $test$
+begin
+  perform _test.t_expect_fail('14.15 trusted SQL cannot rewrite consent columns (trigger)',
+    $$update public.profiles
+         set consent_at = null, consent_version = 'tampered', age_confirmed_at = null
+       where id = 'cccccccc-cccc-cccc-cccc-cccccccccccc'::uuid$$);
+  perform _test.t_eq('14.16 consent columns unchanged after trusted-SQL attempt', 'true',
+    (select (consent_at is not null
+             and consent_version = 'consent-v2'
+             and age_confirmed_at is not null)::text
+       from public.profiles where id = 'cccccccc-cccc-cccc-cccc-cccccccccccc'::uuid));
+end $test$;
+
+-- ============================================================================
+do $test$
+begin
+  raise notice '=== ALL 14 RLS SCENARIOS PASSED ===';
 end $test$;
 
 drop schema if exists _test cascade;

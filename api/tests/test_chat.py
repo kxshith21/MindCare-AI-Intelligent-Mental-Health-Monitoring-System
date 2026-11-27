@@ -306,3 +306,64 @@ def test_valid_uuid_is_accepted(client, monkeypatch) -> None:
     )
     assert response.status_code == 200
     assert UUID(response.json()["conversation_id"])
+
+
+def test_chat_disabled_skips_all_data_llm_and_risk_paths(
+    client, monkeypatch, env
+) -> None:
+    monkeypatch.setattr(
+        chat_router,
+        "get_settings",
+        lambda: _settings().model_copy(update={"chat_enabled": False}),
+    )
+
+    def forbidden(name: str):
+        def _fail(*args, **kwargs):
+            raise AssertionError(f"{name} called while chat is disabled")
+
+        return _fail
+
+    monkeypatch.setattr(
+        chat_router.chat_message_limiter, "check", forbidden("rate limiter")
+    )
+    for func in (
+        "get_profile_region",
+        "create_conversation",
+        "verify_conversation_owner",
+        "insert_user_message",
+        "list_recent_messages",
+        "insert_assistant_message",
+        "insert_risk_event",
+    ):
+        monkeypatch.setattr(chat_router.supabase_data, func, forbidden(func))
+    monkeypatch.setattr(
+        chat_router.risk_rules, "evaluate_conversation", forbidden("risk rules")
+    )
+    monkeypatch.setattr(chat_router, "get_llm_client", forbidden("llm client"))
+    monkeypatch.setattr(chat_router, "analyze_chat", forbidden("analyze chat"))
+
+    region_calls: list = []
+    real_resources = chat_router.get_crisis_resources
+
+    def resources(region):
+        region_calls.append(region)
+        return real_resources(region)
+
+    monkeypatch.setattr(chat_router, "get_crisis_resources", resources)
+
+    response = _post(client, "should-never-be-stored-secret")
+    assert response.status_code == 200
+    data = response.json()
+    assert UUID(data["conversation_id"])
+    assert data["reply"] == chat_router.CHAT_UNAVAILABLE_REPLY
+    assert "should-never-be-stored-secret" not in data["reply"]
+    assert data["emotion"] == "neutral"
+    assert data["themes"] == []
+    assert data["risk_level"] == "low"
+    assert data["show_crisis_resources"] is True
+    assert len(data["crisis_resources"]) >= 2
+    assert region_calls == [None]
+    assert "created_conversation" not in env
+    assert "stored_user_content" not in env
+    assert env["assistant_messages"] == []
+    assert env["risk_events"] == []

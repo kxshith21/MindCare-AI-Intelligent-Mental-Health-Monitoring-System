@@ -19,6 +19,9 @@ class Settings(BaseSettings):
 
     environment: str = "development"
 
+    # Server-only kill switch for AI chat; disabled chat still returns crisis resources.
+    chat_enabled: bool = True
+
     # Supabase Auth (JWT verification)
     supabase_url: str = ""
     supabase_jwks_url: str = ""

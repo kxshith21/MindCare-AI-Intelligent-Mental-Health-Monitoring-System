@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import logging
 import time
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, HTTPException
 
@@ -41,6 +41,13 @@ router = APIRouter(prefix="/chat", tags=["chat"])
 
 patient_only = require_role("patient")
 
+# Static copy for the server-side chat kill switch: no message is stored or sent
+# to the LLM when chat is disabled.
+CHAT_UNAVAILABLE_REPLY = (
+    "Chat is temporarily unavailable right now. If you need immediate support, "
+    "please use the crisis resources below or contact local emergency services."
+)
+
 
 def _data_error(exc: SupabaseDataError) -> HTTPException:
     return HTTPException(status_code=exc.status_code, detail=exc.detail)
@@ -54,6 +61,18 @@ async def post_message(
 ) -> ChatMessageResponse:
     started = time.monotonic()
     settings = get_settings()
+
+    # Kill switch: run no rate-limit, region, DB, LLM or risk-event work at all.
+    if not settings.chat_enabled:
+        return ChatMessageResponse(
+            conversation_id=uuid4(),
+            reply=CHAT_UNAVAILABLE_REPLY,
+            emotion="neutral",
+            themes=[],
+            risk_level="low",
+            show_crisis_resources=True,
+            crisis_resources=get_crisis_resources(None),
+        )
 
     try:
         chat_message_limiter.check(user.user_id)

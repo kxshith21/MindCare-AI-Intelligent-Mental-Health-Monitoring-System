@@ -2,8 +2,9 @@
 
 Flow:
 1. Client sends `Authorization: Bearer <supabase-access-token>`.
-2. We verify the token's signature against the Supabase project's JWKS (RS256)
-   and check `iss` / `aud` / `exp`.
+2. We verify the token's signature against the Supabase project's JWKS
+   (RS256 or ES256, depending on the project's signing key) and check
+   `iss` / `aud` / `exp`.
 3. We extract the user id (`sub`) and the app role (`patient` | `psychologist`).
 
 The role claim is used for endpoint-level role checks. The `profiles` table
@@ -28,6 +29,10 @@ logger = logging.getLogger(__name__)
 
 Role = Literal["patient", "psychologist"]
 APP_ROLES: tuple[str, ...] = ("patient", "psychologist")
+
+# Supabase hosted projects commonly use RS256; newer local CLI versions sign
+# with ES256. Both are asymmetric, so verification always uses the public JWKS.
+SUPPORTED_ALGORITHMS: dict[str, str] = {"RS256": "RSA", "ES256": "EC"}
 
 JWKS_CACHE_TTL_SECONDS = 3600
 
@@ -84,6 +89,24 @@ def reset_jwks_cache() -> None:
 # ---------------------------------------------------------------------------
 
 
+def load_public_key(key: dict, algorithm: str) -> object:
+    """Build a verification key from a JWKS entry for an allowed algorithm."""
+    expected_kty = SUPPORTED_ALGORITHMS[algorithm]
+    if key.get("kty") != expected_kty:
+        raise AuthError("Signing key type does not match token algorithm")
+    if key.get("alg") and key["alg"] != algorithm:
+        raise AuthError("Signing key algorithm does not match token")
+    if key.get("use") and key["use"] != "sig":
+        raise AuthError("Signing key cannot be used for signatures")
+
+    try:
+        if algorithm == "RS256":
+            return jwt.algorithms.RSAAlgorithm.from_jwk(json.dumps(key))
+        return jwt.algorithms.ECAlgorithm.from_jwk(json.dumps(key))
+    except (jwt.PyJWTError, ValueError, TypeError) as exc:
+        raise AuthError("Could not load signing key") from exc
+
+
 def decode_token(token: str, jwks: dict, issuer: str) -> dict:
     """Verify a Supabase access token and return its claims.
 
@@ -94,24 +117,22 @@ def decode_token(token: str, jwks: dict, issuer: str) -> dict:
     except jwt.PyJWTError as exc:
         raise AuthError("Malformed token") from exc
 
-    if header.get("alg") != "RS256":
-        raise AuthError(f"Unsupported token algorithm: {header.get('alg')}")
+    algorithm = header.get("alg")
+    if algorithm not in SUPPORTED_ALGORITHMS:
+        raise AuthError(f"Unsupported token algorithm: {algorithm}")
 
     kid = header.get("kid")
     key = next((k for k in jwks.get("keys", []) if k.get("kid") == kid), None)
     if key is None:
         raise AuthError("Token signing key not recognized")
 
-    try:
-        public_key = jwt.algorithms.RSAAlgorithm.from_jwk(json.dumps(key))
-    except (jwt.PyJWTError, ValueError) as exc:
-        raise AuthError("Could not load signing key") from exc
+    public_key = load_public_key(key, algorithm)
 
     try:
         return jwt.decode(
             token,
             public_key,
-            algorithms=["RS256"],
+            algorithms=[algorithm],
             audience="authenticated",
             issuer=issuer,
             options={"require": ["exp", "iss", "aud", "sub"]},

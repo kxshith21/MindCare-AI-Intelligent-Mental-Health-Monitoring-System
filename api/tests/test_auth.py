@@ -1,7 +1,7 @@
 """Auth guard tests: Supabase JWT verification and role checks.
 
-A fresh RSA key pair is generated per test session and a matching JWKS is
-served via a monkeypatched fetcher, so no network access is needed.
+Fresh RSA and EC key pairs are generated per test session and matching JWKS
+entries are served via a monkeypatched fetcher, so no network access is needed.
 """
 
 import base64
@@ -10,7 +10,7 @@ import time
 import jwt as pyjwt
 import pytest
 from cryptography.hazmat.primitives import serialization
-from cryptography.hazmat.primitives.asymmetric import rsa
+from cryptography.hazmat.primitives.asymmetric import ec, rsa
 from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
 
@@ -51,7 +51,33 @@ def key_pair() -> tuple[bytes, dict]:
     return private_pem, jwks
 
 
-def _make_token(private_pem: bytes, **overrides: object) -> str:
+@pytest.fixture(scope="module")
+def ec_key_pair() -> tuple[bytes, dict]:
+    """Return (private_key_pem, jwks) for ES256-signed tokens (new local CLI)."""
+    private_key = ec.generate_private_key(ec.SECP256R1())
+    private_pem = private_key.private_bytes(
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PrivateFormat.PKCS8,
+        encryption_algorithm=serialization.NoEncryption(),
+    )
+    numbers = private_key.public_key().public_numbers()
+    jwks = {
+        "keys": [
+            {
+                "kty": "EC",
+                "crv": "P-256",
+                "kid": "test-key",
+                "use": "sig",
+                "alg": "ES256",
+                "x": _b64url_uint(numbers.x),
+                "y": _b64url_uint(numbers.y),
+            }
+        ]
+    }
+    return private_pem, jwks
+
+
+def _claims(**overrides: object) -> dict:
     claims: dict = {
         "sub": "user-123",
         # Supabase always stamps this built-in claim; it is not an app role.
@@ -62,7 +88,19 @@ def _make_token(private_pem: bytes, **overrides: object) -> str:
         "exp": int(time.time()) + 300,
     }
     claims.update(overrides)
-    return pyjwt.encode(claims, private_pem, algorithm="RS256", headers={"kid": "test-key"})
+    return claims
+
+
+def _make_token(private_pem: bytes, **overrides: object) -> str:
+    return pyjwt.encode(
+        _claims(**overrides), private_pem, algorithm="RS256", headers={"kid": "test-key"}
+    )
+
+
+def _make_es256_token(private_pem: bytes, **overrides: object) -> str:
+    return pyjwt.encode(
+        _claims(**overrides), private_pem, algorithm="ES256", headers={"kid": "test-key"}
+    )
 
 
 @pytest.fixture()
@@ -143,6 +181,24 @@ def test_decode_token_accepts_valid_signature(key_pair: tuple[bytes, dict]) -> N
     private_pem, jwks = key_pair
     claims = decode_token(_make_token(private_pem), jwks, ISSUER)
     assert claims["sub"] == "user-123"
+
+
+def test_decode_token_accepts_es256_signature(ec_key_pair: tuple[bytes, dict]) -> None:
+    private_pem, jwks = ec_key_pair
+    claims = decode_token(_make_es256_token(private_pem), jwks, ISSUER)
+    assert claims["sub"] == "user-123"
+
+
+def test_decode_token_rejects_wrong_es256_signature(ec_key_pair: tuple[bytes, dict]) -> None:
+    _, jwks = ec_key_pair
+    other_key = ec.generate_private_key(ec.SECP256R1())
+    other_pem = other_key.private_bytes(
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PrivateFormat.PKCS8,
+        encryption_algorithm=serialization.NoEncryption(),
+    )
+    with pytest.raises(AuthError):
+        decode_token(_make_es256_token(other_pem), jwks, ISSUER)
 
 
 def test_decode_token_rejects_wrong_signature(key_pair: tuple[bytes, dict]) -> None:

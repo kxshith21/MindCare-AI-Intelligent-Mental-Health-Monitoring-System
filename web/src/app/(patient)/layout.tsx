@@ -13,7 +13,7 @@ const NAV = [
 
 export default function PatientLayout({ children }: { children: React.ReactNode }) {
   return (
-    <div className="flex min-h-screen flex-col">
+    <div className="flex flex-1 flex-col">
       <SessionWatcher />
       <header className="border-b bg-background">
         <div className="mx-auto flex h-14 max-w-5xl items-center justify-between gap-4 px-4">

@@ -6,6 +6,8 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { createSupabaseBrowserClient } from "@/lib/supabase";
 
+const CONSENT_DOCUMENT_VERSION = "draft-2026-11-27";
+
 /**
  * Patient signup — the ONLY client-facing signup.
  *
@@ -20,6 +22,8 @@ export default function SignupPage() {
   const [password, setPassword] = useState("");
   const [displayName, setDisplayName] = useState("");
   const [region, setRegion] = useState("");
+  const [legalAccepted, setLegalAccepted] = useState(false);
+  const [ageConfirmed, setAgeConfirmed] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [needsConfirm, setNeedsConfirm] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -27,6 +31,12 @@ export default function SignupPage() {
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError(null);
+    if (!legalAccepted || !ageConfirmed) {
+      setError(
+        "Please accept the terms and privacy notice, acknowledge the crisis notice, and confirm you are 18 or older.",
+      );
+      return;
+    }
     setBusy(true);
     try {
       const supabase = createSupabaseBrowserClient();
@@ -38,6 +48,11 @@ export default function SignupPage() {
             display_name: displayName.trim(),
             // optional; the trigger normalises anything invalid to null
             ...(region.trim() ? { region: region.trim().toUpperCase() } : {}),
+            terms_accepted: true,
+            privacy_accepted: true,
+            crisis_notice_acknowledged: true,
+            age_18_plus: true,
+            consent_document_version: CONSENT_DOCUMENT_VERSION,
           },
         },
       });
@@ -128,6 +143,46 @@ export default function SignupPage() {
             className="rounded-lg border border-input bg-background px-3 py-2 text-sm uppercase outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
           />
         </label>
+        <div className="flex flex-col gap-2 rounded-lg border p-3 text-sm">
+          <label className="flex items-start gap-2">
+            <input
+              type="checkbox"
+              required
+              checked={legalAccepted}
+              onChange={(e) => setLegalAccepted(e.target.checked)}
+              className="mt-0.5"
+            />
+            <span>
+              I accept the Terms and Privacy notice and acknowledge that MindCare
+              AI is not a crisis service.
+            </span>
+          </label>
+          <p className="pl-6 text-xs text-muted-foreground">
+            Read the{" "}
+            <Link href="/terms" className="underline">
+              Terms
+            </Link>
+            ,{" "}
+            <Link href="/privacy" className="underline">
+              Privacy notice
+            </Link>{" "}
+            and{" "}
+            <Link href="/safety" className="underline">
+              Safety
+            </Link>{" "}
+            information before continuing.
+          </p>
+          <label className="flex items-start gap-2">
+            <input
+              type="checkbox"
+              required
+              checked={ageConfirmed}
+              onChange={(e) => setAgeConfirmed(e.target.checked)}
+              className="mt-0.5"
+            />
+            <span>I confirm that I am 18 or older.</span>
+          </label>
+        </div>
         {error && (
           <p className="text-sm text-destructive" role="alert">
             {error}

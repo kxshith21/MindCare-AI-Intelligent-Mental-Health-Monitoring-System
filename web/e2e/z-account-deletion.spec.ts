@@ -14,6 +14,12 @@ test("a patient can delete a throwaway account with explicit confirmation", asyn
   await page.getByLabel("Display name").fill("E2E Delete");
   await page.getByLabel("Email").fill(email);
   await page.getByLabel("Password").fill(DEMO_PASSWORD);
+  await page
+    .getByRole("checkbox", { name: /I accept the Terms and Privacy notice/i })
+    .check();
+  await page
+    .getByRole("checkbox", { name: /I confirm that I am 18 or older/i })
+    .check();
   await page.getByRole("button", { name: "Sign up" }).click();
   await expectPatientDashboard(page);
 

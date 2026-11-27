@@ -24,15 +24,12 @@ test("patient chat sends one message and shows a supportive reply", async ({ pag
   await page.goto("/patient/chat");
   await expect(page.getByRole("heading", { name: "Reflect in chat" })).toBeVisible();
 
-  await page
-    .getByLabel("Your message")
-    .fill("I had a fairly ordinary day and I want to reflect on it.");
+  const message = `E2E reflection ${Date.now()}`;
+  await page.getByLabel("Your message").fill(message);
   await page.getByRole("button", { name: "Send" }).click();
 
-  await expect(
-    page.getByText("I had a fairly ordinary day and I want to reflect on it."),
-  ).toBeVisible();
-  await expect(page.getByText(/I'm here with you/)).toBeVisible();
+  await expect(page.getByRole("article").filter({ hasText: message })).toBeVisible();
+  await expect(page.getByText(/I'm here with you/).last()).toBeVisible();
   await expect(page.getByText(/risk level/i)).toHaveCount(0);
   await expect(page.getByLabel("Crisis support resources")).toHaveCount(0);
 });
@@ -95,8 +92,13 @@ test("care team shows consent scope and keeps invite responses generic", async (
 
   await expect(page.getByRole("heading", { name: "Care team" })).toBeVisible();
   await expect(page.getByText("Dr Verified")).toBeVisible();
-  await expect(page.getByText(/Active · summary only/)).toBeVisible();
-  await expect(page.getByLabel("Scope")).toBeVisible();
+  await expect(page.getByText(/Active · summary only/).first()).toBeVisible();
+  await expect(
+    page
+      .getByRole("listitem")
+      .filter({ hasText: "Dr Verified" })
+      .getByLabel("Scope"),
+  ).toBeVisible();
 
   await page
     .getByLabel("Psychologist email")

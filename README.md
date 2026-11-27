@@ -57,9 +57,14 @@ cd api
 python -m venv .venv
 .venv\Scripts\activate       # Windows; on macOS/Linux: source .venv/bin/activate
 pip install -r requirements.txt
-cp .env.example .env         # fill in SUPABASE_URL etc.
+cp .env.example .env         # fill in SUPABASE_URL and server-side keys
 uvicorn app.main:app --reload --port 8000
 ```
+
+For chat, the API expects a **Groq** key in `LLM_API_KEY` with
+`LLM_BASE_URL=https://api.groq.com/openai/v1` and
+`LLM_MODEL=openai/gpt-oss-20b`. Keep it server-side in `api/.env`; tests force
+`LLM_PROVIDER=fake` and never call a live provider. See `docs/RISK.md`.
 
 Health check: `GET http://localhost:8000/health`
 
@@ -74,7 +79,7 @@ pytest
 - **Phase 0** — read-only audit: [`docs/AUDIT.md`](docs/AUDIT.md) ✅
 - **Phase 1** — repo cleanup + `/web` and `/api` scaffolding ✅
 - **Phase 2** — Supabase schema, auth, RLS ✅ ([RLS.md](docs/RLS.md), [DATA_MODEL.md](docs/DATA_MODEL.md))
-- **Phase 3** — AI + risk logic in FastAPI ⏳
+- **Phase 3** — AI + risk logic in FastAPI ✅ ([RISK.md](docs/RISK.md), [TODO.md](docs/TODO.md))
 - **Phase 4** — connect the frontend ⏳
 - **Phase 5** — docs and deploy readiness ⏳
 

@@ -1,6 +1,6 @@
 # Phase 2 — Data model
 
-Implemented in `supabase/migrations/` (10 ordered files). All tables are in
+Implemented in `supabase/migrations/` (12 ordered files). All tables are in
 `public`; RLS is enabled on every one. See `RLS.md` for the policy matrix.
 
 ```
@@ -41,7 +41,7 @@ Two `auth.users` triggers manage role provisioning:
 | `care_links` | `id`, `patient_id`, `psychologist_id`, `status`, `share_scope`, `invited_at`, `consented_at`, `revoked_at` | `status in (pending,active,revoked)`; `share_scope in (summary_only,full)`; no self-links; unique live `(patient_id, psychologist_id)`; revoked rows frozen and require `revoked_at`; BEFORE UPDATE trigger enforces transitions and immutable columns. |
 | `checkins` | `id`, `patient_id`, `mood`, `note`, `phq9_answers`, `gad7_answers`, `phq9_score`, `gad7_score`, `created_at` | `mood 1..5`; arrays exactly 9 / 7 values in `0..3`. Trigger **recomputes** scores from answers on INSERT/UPDATE; client-supplied scores are overwritten or discarded. No UPDATE policy. |
 | `conversations` | `id`, `patient_id`, `created_at` | Append-only for clients. |
-| `messages` | `id`, `conversation_id`, `patient_id`, `sender`, `content`, `created_at` | `sender in ('user','assistant')`; `content 1..8000`. Trigger enforces `patient_id` matches the conversation owner. Clients may insert only `sender='user'`. |
+| `messages` | `id`, `conversation_id`, `patient_id`, `sender`, `content`, `created_at`, `prompt_version`, `model` | `sender in ('user','assistant')`; `content 1..2000` via the API schema (DB check allows up to 8000). Trigger enforces `patient_id` matches the conversation owner. Clients may insert only `sender='user'`. Migration 0012 requires `prompt_version` and `model` on every assistant row. |
 | `risk_events` | `id`, `patient_id`, `message_id`, `level`, `reason`, `status`, `reviewed_by`, `reviewed_at`, `created_at` | `level in (low,elevated,high)`; `status in (new,acknowledged,resolved)`. Trigger sets `reviewed_by`/`reviewed_at`: `new` ⇒ both null, otherwise reviewer pinned to actor. Client INSERT/DELETE denied. |
 | `clinician_notes` | `id`, `psychologist_id`, `patient_id`, `note`, `created_at` | `note 1..8000`; no self-notes. Author-only CRUD while an active link exists. Patients have no access. |
 | `audit_log` | `id`, `actor_id`, `action`, `target_patient_id`, `created_at` | `action 1..100`. Append-only via API; identity FKs use `ON DELETE SET NULL`. |
@@ -92,7 +92,8 @@ trusted (test 13).
 | `invite_psychologist(email, share_scope)` | Patient-only, anti-enumeration invite to a **verified** psychologist. |
 | `shared_checkins(patient)` | Scope-aware check-in read for verified psychologists with an active link. |
 | `record_patient_access(patient, action)` | Audit append for every psychologist data view. |
-| `delete_my_data()` | Patient-only data deletion; keeps profile/account, anonymizes audit rows. |
+| `delete_my_data()` | Patient-only data deletion; keeps profile/account, anonymizes audit rows. The account itself is removed by `DELETE /account` with the service role. |
+| `link_scope(patient)` | Helper (migration 0008) returning the caller's active `share_scope`, else `NULL`; used by policies and the psychologist API. |
 
 All are `SECURITY DEFINER`, `set search_path = ''`, fully qualified, and have
 EXECUTE revoked from `public`/`anon`.
@@ -102,4 +103,6 @@ EXECUTE revoked from `public`/`anon`.
 - No SQLite, no `.db` file, no auto-seeded sample data outside `supabase/seed.sql`.
 - No wellness score, no synthetic mood chart, no diagnosis, no medication advice.
 - No outbound email/SMS. Risk is stored as a `risk_events` row for the psychologist queue.
-- No account deletion endpoint yet — Phase 3 service-role API (TODO).
+- Account deletion is implemented in Phase 3: `DELETE /account` calls
+  `delete_my_data()` with the user's JWT, then removes the auth user with the
+  service role. See `RISK.md` for the triage design and `TODO.md` for handoff work.

@@ -67,7 +67,7 @@ scores and mood values.
 | 2 | Supabase schema, auth, RLS, care-link flow | ✅ done |
 | 3 | Port AI + risk logic into FastAPI | ✅ done |
 | 4 | Connect the frontend | ✅ done |
-| 5 | Docs + deploy readiness | ⏳ |
+| 5 | Docs + deploy readiness | ✅ |
 
 ## Commands
 

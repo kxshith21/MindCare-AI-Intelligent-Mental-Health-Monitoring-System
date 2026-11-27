@@ -1,0 +1,21 @@
+title = "MindCare AI gitleaks config"
+
+[extend]
+useDefault = true
+
+# Only explicit, known non-secret values are allowed. Do not allowlist whole
+# directories: fixture files could otherwise hide a real key added later.
+[allowlist]
+description = "Documented placeholders and local test fixtures"
+paths = [
+  '''(^|/)\.env\.example$''',
+]
+regexes = [
+  '''demo-password-123''',
+  '''service-key-secret''',
+  '''groq-secret''',
+  '''your_groq_api_key_here''',
+  '''ci-(anon|service-role)-placeholder''',
+  '''ci-placeholder''',
+  '''dev-mental-health-key''',
+]

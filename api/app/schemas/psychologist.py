@@ -18,6 +18,7 @@ class LinkedPatient(BaseModel):
     display_name: str | None = None
     region: str | None = None
     share_scope: Literal["summary_only", "full"]
+    last_checkin_at: datetime | None = None
 
 
 class PatientListResponse(BaseModel):
@@ -26,8 +27,8 @@ class PatientListResponse(BaseModel):
 
 class TrendPoint(BaseModel):
     mood: int
-    phq9_score: int
-    gad7_score: int
+    phq9_score: int | None = None
+    gad7_score: int | None = None
     created_at: datetime
     note: str | None = None
     phq9_answers: list[int] | None = None

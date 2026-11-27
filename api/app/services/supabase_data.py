@@ -10,6 +10,7 @@ to perform. Nothing here logs message content or keys.
 from __future__ import annotations
 
 import logging
+from datetime import datetime
 from typing import Any
 
 import httpx
@@ -223,23 +224,25 @@ async def insert_risk_event(
     settings: Settings,
     *,
     patient_id: str,
-    message_id: str,
     level: str,
     reason: str,
+    message_id: str | None = None,
 ) -> str:
     # `reason` is a short category label from the rules/LLM enum, never the
-    # user's message text.
+    # user's message text. Check-in flags have no message id.
+    body: dict[str, Any] = {
+        "patient_id": patient_id,
+        "level": level,
+        "reason": reason,
+    }
+    if message_id:
+        body["message_id"] = message_id
     rows = await _request(
         settings,
         "POST",
         "/rest/v1/risk_events",
         service=True,
-        json_body={
-            "patient_id": patient_id,
-            "message_id": message_id,
-            "level": level,
-            "reason": reason,
-        },
+        json_body=body,
     )
     row = _first_row(rows)
     return str(row["id"]) if row and row.get("id") else ""
@@ -298,6 +301,7 @@ async def call_rpc(
 def re_rpc_name(name: str) -> bool:
     """Allowlist so a path can never be built from untrusted input."""
     return name in {
+        "invite_psychologist",
         "shared_checkins",
         "record_patient_access",
         "delete_my_data",
@@ -446,3 +450,138 @@ async def delete_auth_user(settings: Settings, user_id: str) -> None:
     if response.status_code >= 400:
         logger.warning("supabase.admin_delete upstream_error status=%s", response.status_code)
         raise SupabaseDataError(502, "Could not delete the account.")
+
+
+# ---------------------------------------------------------------------------
+# Check-ins (RLS-scoped with the user's JWT)
+# ---------------------------------------------------------------------------
+
+
+async def insert_checkin(
+    settings: Settings,
+    token: str,
+    *,
+    patient_id: str,
+    mood: int,
+    note: str | None,
+    phq9_answers: list[int] | None,
+    gad7_answers: list[int] | None,
+) -> dict[str, Any]:
+    body: dict[str, Any] = {"patient_id": patient_id, "mood": mood}
+    if note is not None:
+        body["note"] = note
+    if phq9_answers is not None:
+        body["phq9_answers"] = phq9_answers
+    if gad7_answers is not None:
+        body["gad7_answers"] = gad7_answers
+    rows = await _request(
+        settings,
+        "POST",
+        "/rest/v1/checkins",
+        token=token,
+        json_body=body,
+    )
+    row = _first_row(rows)
+    if not row or not row.get("id"):
+        raise SupabaseDataError(502, "Could not store the check-in.")
+    return row
+
+
+async def list_checkins(
+    settings: Settings,
+    token: str,
+    patient_id: str,
+    *,
+    from_dt: datetime | None = None,
+    to_dt: datetime | None = None,
+) -> list[dict[str, Any]]:
+    params: dict[str, Any] = {
+        "patient_id": f"eq.{patient_id}",
+        "select": (
+            "id,patient_id,mood,note,phq9_score,gad7_score,"
+            "phq9_answers,gad7_answers,created_at"
+        ),
+        "order": "created_at.asc",
+    }
+    if from_dt is not None and to_dt is not None:
+        params["and"] = (
+            f"(created_at.gte.{from_dt.isoformat()},"
+            f"created_at.lte.{to_dt.isoformat()})"
+        )
+    elif from_dt is not None:
+        params["created_at"] = f"gte.{from_dt.isoformat()}"
+    elif to_dt is not None:
+        params["created_at"] = f"lte.{to_dt.isoformat()}"
+    rows = await _request(
+        settings,
+        "GET",
+        "/rest/v1/checkins",
+        token=token,
+        params=params,
+    )
+    return rows if isinstance(rows, list) else []
+
+
+# ---------------------------------------------------------------------------
+# Clinician notes (psychologist's private, RLS-scoped notes)
+# ---------------------------------------------------------------------------
+
+
+async def list_clinician_notes(
+    settings: Settings, token: str, patient_id: str
+) -> list[dict[str, Any]]:
+    rows = await _request(
+        settings,
+        "GET",
+        "/rest/v1/clinician_notes",
+        token=token,
+        params={
+            "patient_id": f"eq.{patient_id}",
+            "select": "id,patient_id,psychologist_id,note,created_at",
+            "order": "created_at.desc",
+        },
+    )
+    return rows if isinstance(rows, list) else []
+
+
+async def insert_clinician_note(
+    settings: Settings, token: str, *, patient_id: str, psychologist_id: str, note: str
+) -> dict[str, Any]:
+    rows = await _request(
+        settings,
+        "POST",
+        "/rest/v1/clinician_notes",
+        token=token,
+        json_body={
+            "patient_id": patient_id,
+            "psychologist_id": psychologist_id,
+            "note": note,
+        },
+    )
+    row = _first_row(rows)
+    if not row or not row.get("id"):
+        raise SupabaseDataError(502, "Could not store the note.")
+    return row
+
+
+async def get_latest_checkin_at(
+    settings: Settings, token: str, patient_id: str
+) -> str | None:
+    """Derive the last check-in date from the existing shared_checkins RPC."""
+    rows = await call_rpc(settings, token, "shared_checkins", {"p_patient": patient_id})
+    if not isinstance(rows, list) or not rows:
+        return None
+    first = rows[0]
+    return str(first["created_at"]) if isinstance(first, dict) and first.get("created_at") else None
+
+
+async def invite_psychologist(
+    settings: Settings, token: str, *, email: str, share_scope: str = "summary_only"
+) -> dict[str, Any]:
+    result = await call_rpc(
+        settings,
+        token,
+        "invite_psychologist",
+        {"p_email": email, "p_share_scope": share_scope},
+    )
+    return result if isinstance(result, dict) else {}

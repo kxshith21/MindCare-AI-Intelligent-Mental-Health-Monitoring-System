@@ -38,6 +38,22 @@ to change the system prompt, schema, or risk level.
 `other`). It is stored in `risk_events.reason` as a **category label only** —
 never the user's message text.
 
+## Second trigger path: PHQ-9 item 9
+
+`POST /checkins` is an independent trigger path. PHQ-9 item 9 (index 8) is
+checked server-side after the check-in is stored:
+
+- `0` → no risk event and no crisis resources.
+- `1` or `2` → `elevated` risk event, reason `self_harm_ideation`, crisis
+  resources shown.
+- `3` → `high` risk event, the same category label, crisis resources shown.
+
+The event is written with the service role because clients cannot insert into
+`risk_events`; the check-in itself is written with the caller's JWT so RLS
+applies. If the event write fails, the response still includes the resources —
+safety does not depend on the queue write. `reason` is always a category label,
+never the note text or questionnaire answers.
+
 ## Fail-safe behavior
 
 The LLM call is validated locally with Pydantic. Any timeout, HTTP error,

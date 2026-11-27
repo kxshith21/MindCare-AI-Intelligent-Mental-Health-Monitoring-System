@@ -70,6 +70,21 @@ async def _audit_access(
         )
 
 
+async def _with_last_checkin(
+    settings, token: str, patients: list[dict]
+) -> list[dict]:
+    """Derive the dashboard date from the existing shared_checkins RPC."""
+    result: list[dict] = []
+    for row in patients:
+        patient_id = str(row["id"])
+        try:
+            last = await supabase_data.get_latest_checkin_at(settings, token, patient_id)
+        except SupabaseDataError:
+            last = None
+        result.append({**row, "last_checkin_at": last})
+    return result
+
+
 @router.get("/patients", response_model=PatientListResponse)
 async def list_patients(
     user: CurrentUser = Depends(psychologist_only),
@@ -87,7 +102,7 @@ async def list_patients(
     await _audit_access(
         settings, token, {str(row["id"]) for row in patients}, "view_patient_list"
     )
-    return PatientListResponse(patients=patients)
+    return PatientListResponse(patients=await _with_last_checkin(settings, token, patients))
 
 
 @router.get("/patients/{patient_id}/trends", response_model=TrendsResponse)

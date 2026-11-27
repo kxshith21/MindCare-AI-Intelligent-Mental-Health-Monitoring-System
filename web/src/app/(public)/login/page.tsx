@@ -37,7 +37,6 @@ export default function LoginPage() {
       }
       const role = getAppRole(data.user);
       router.push(role === "psychologist" ? "/psychologist/dashboard" : "/patient/dashboard");
-      router.refresh();
     } finally {
       setBusy(false);
     }

@@ -3,14 +3,8 @@
 import Link from "next/link";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
-import { ApiError, apiPost } from "@/lib/api";
-
-interface PsychologistSignupResponse {
-  user_id: string;
-  email: string;
-  role: string;
-  verified: boolean;
-}
+import { ApiError, api } from "@/lib/api";
+import type { PsychologistSignupResponse } from "@/lib/types";
 
 /**
  * Psychologist application — posts to the FastAPI endpoint
@@ -34,16 +28,13 @@ export default function PsychologistSignupPage() {
     setError(null);
     setBusy(true);
     try {
-      const result = await apiPost<PsychologistSignupResponse>(
-        "/auth/psychologist-signup",
-        {
-          email,
-          password,
-          display_name: displayName.trim(),
-          license_no: licenseNo.trim(),
-          ...(region.trim() ? { region: region.trim().toUpperCase() } : {}),
-        },
-      );
+      const result: PsychologistSignupResponse = await api.signUpPsychologist({
+        email,
+        password,
+        display_name: displayName.trim(),
+        license_no: licenseNo.trim(),
+        ...(region.trim() ? { region: region.trim().toUpperCase() } : {}),
+      });
       setCreated(result);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Something went wrong.");

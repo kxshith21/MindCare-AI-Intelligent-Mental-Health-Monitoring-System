@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { CrisisResources } from "@/components/crisis-resources";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -32,13 +33,19 @@ export default function LandingPage() {
       </div>
       <Card className="mt-12 w-full max-w-md text-left">
         <CardHeader>
-          <CardTitle className="text-base">Placeholder</CardTitle>
+          <CardTitle className="text-base">About this space</CardTitle>
           <CardDescription>
-            This landing page is a Phase 1 placeholder; full content lands in Phase 4.
+            MindCare AI offers reflection, check-ins and consent-based progress
+            sharing. It is not a crisis service or a substitute for professional
+            care.
           </CardDescription>
         </CardHeader>
         <CardContent className="text-sm text-muted-foreground">
-          This is not a crisis service or a substitute for professional care.
+          If you need immediate support, the resources below are available
+          whether or not you have an account.
+          <div className="mt-4 text-left">
+            <CrisisResources />
+          </div>
         </CardContent>
       </Card>
     </div>

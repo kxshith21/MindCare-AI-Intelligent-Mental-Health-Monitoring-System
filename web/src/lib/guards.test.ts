@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { getAppRole, guardPath } from "./guards";
+import { AWAITING_VERIFICATION_PATH, getAppRole, guardPath } from "./guards";
 
 describe("getAppRole", () => {
   it("returns null when the user is missing", () => {
@@ -114,5 +114,33 @@ describe("guardPath", () => {
     expect(guardPath("/api/anything", null, false)).toEqual({ type: "allow" });
     expect(guardPath("/patients", null, false)).toEqual({ type: "allow" });
     expect(guardPath("/somewhere-else", "patient", true)).toEqual({ type: "allow" });
+  });
+
+  it("holds unverified psychologists on the awaiting-verification page", () => {
+    expect(
+      guardPath("/psychologist/dashboard", "psychologist", true, false),
+    ).toEqual({ type: "redirect", to: AWAITING_VERIFICATION_PATH });
+    expect(
+      guardPath("/psychologist/patients/42", "psychologist", true, false),
+    ).toEqual({ type: "redirect", to: AWAITING_VERIFICATION_PATH });
+    expect(
+      guardPath("/login", "psychologist", true, false),
+    ).toEqual({ type: "redirect", to: AWAITING_VERIFICATION_PATH });
+  });
+
+  it("allows verified psychologists and the awaiting page itself", () => {
+    expect(
+      guardPath("/psychologist/dashboard", "psychologist", true, true),
+    ).toEqual({ type: "allow" });
+    expect(
+      guardPath(AWAITING_VERIFICATION_PATH, "psychologist", true, false),
+    ).toEqual({ type: "allow" });
+    expect(guardPath(AWAITING_VERIFICATION_PATH, null, false)).toEqual({
+      type: "redirect",
+      to: "/login",
+    });
+    expect(
+      guardPath(AWAITING_VERIFICATION_PATH, "patient", true),
+    ).toEqual({ type: "redirect", to: "/patient/dashboard" });
   });
 });

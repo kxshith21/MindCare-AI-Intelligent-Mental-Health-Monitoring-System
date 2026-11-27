@@ -1,25 +1,15 @@
 /**
  * Pure route-guard logic used by src/proxy.ts (Next.js 16 request proxy).
  *
- * Kept dependency-free so it can be unit-tested with vitest.
- *
  * Role source: **`app_metadata.role` ONLY** — never `user_metadata`.
- * `user_metadata` is client-writable, so a user could edit their own metadata
- * to claim the psychologist role. `app_metadata` is written server-side only.
- *
- * The psychologist role is assigned only by the server-side signup endpoint
- * (`POST /auth/psychologist-signup`); client-supplied `user_metadata.role`
- * is ignored by both Supabase Auth and the DB signup trigger.
- *
- * Role enforcement lives here for routing, in RLS for data, and in the API
- * for endpoints that use the service role.
+ * Verification is a separate claim read from `psychologist_profiles`.
  */
-
 export type Role = "patient" | "psychologist";
 
 const APP_ROLES: readonly string[] = ["patient", "psychologist"];
 
-/** Routes that never require a session (auth pages + landing). */
+export const AWAITING_VERIFICATION_PATH = "/psychologist/awaiting-verification";
+
 export const PUBLIC_PATHS: ReadonlySet<string> = new Set([
   "/",
   "/login",
@@ -38,12 +28,7 @@ function normalizeRole(value: unknown): Role | null {
   return typeof value === "string" && APP_ROLES.includes(value) ? (value as Role) : null;
 }
 
-/**
- * Extract the app role from a Supabase user object.
- *
- * Reads `app_metadata.role` only. Returns null when the user is missing or
- * has no recognized role yet (role assignment lands in Phase 2).
- */
+/** Read the role from `app_metadata` only. */
 export function getAppRole(user: unknown): Role | null {
   if (!user || typeof user !== "object") return null;
   const appMetadata = (user as Record<string, unknown>).app_metadata;
@@ -53,21 +38,27 @@ export function getAppRole(user: unknown): Role | null {
 
 /**
  * Decide whether a pathname may be rendered.
- * - public paths pass, but a signed-in user with a known role is sent to
- *   their own dashboard (they have no business on /login, /signup, /)
- * - paths outside `/patient/*` and `/psychologist/*` are not ours to guard
- * - no session on a protected path → /login
- * - session with a mismatched `app_metadata.role` → that role's own dashboard
- * - session without a known role → allowed; the role area layouts/pages
- *   enforce verification and RLS enforces data access
+ *
+ * `verified` is optional so existing 3-argument callers keep the previous
+ * behavior; when explicitly false, psychologists are held on the awaiting page.
  */
 export function guardPath(
   pathname: string,
   role: Role | null,
   hasSession: boolean,
+  verified?: boolean | null,
 ): GuardDecision {
+  if (pathname === AWAITING_VERIFICATION_PATH) {
+    if (!hasSession) return { type: "redirect", to: "/login" };
+    if (role === "patient") return { type: "redirect", to: DASHBOARD.patient };
+    return { type: "allow" };
+  }
+
   if (PUBLIC_PATHS.has(pathname)) {
     if (hasSession && role !== null) {
+      if (role === "psychologist" && verified === false) {
+        return { type: "redirect", to: AWAITING_VERIFICATION_PATH };
+      }
       return { type: "redirect", to: DASHBOARD[role] };
     }
     return { type: "allow" };
@@ -78,19 +69,16 @@ export function guardPath(
     pathname === "/psychologist" || pathname.startsWith("/psychologist/");
 
   if (!isPatientArea && !isPsychologistArea) return { type: "allow" };
-
   if (!hasSession) return { type: "redirect", to: "/login" };
-
-  // Session exists but role not yet assigned — allow; enforcement is RLS.
   if (role === null) return { type: "allow" };
 
   if (isPatientArea) {
     return role === "patient"
       ? { type: "allow" }
-      : { type: "redirect", to: "/psychologist/dashboard" };
+      : { type: "redirect", to: DASHBOARD.psychologist };
   }
 
-  return role === "psychologist"
-    ? { type: "allow" }
-    : { type: "redirect", to: "/patient/dashboard" };
+  if (role !== "psychologist") return { type: "redirect", to: DASHBOARD.patient };
+  if (verified === false) return { type: "redirect", to: AWAITING_VERIFICATION_PATH };
+  return { type: "allow" };
 }

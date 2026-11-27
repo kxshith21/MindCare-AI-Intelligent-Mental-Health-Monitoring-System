@@ -7,3 +7,6 @@ import os
 # empty env vars, so setdefault() is not enough here.
 os.environ["SUPABASE_URL"] = "https://test-project.supabase.co"
 os.environ["CORS_ORIGINS"] = "http://localhost:3000"
+# Tests must never call a real LLM, even if api/.env has a Groq key.
+os.environ["LLM_PROVIDER"] = "fake"
+os.environ["LLM_API_KEY"] = ""

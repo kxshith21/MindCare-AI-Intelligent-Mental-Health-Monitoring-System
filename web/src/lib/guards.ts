@@ -7,21 +7,30 @@
  * `user_metadata` is client-writable, so a user could edit their own metadata
  * to claim the psychologist role. `app_metadata` is written server-side only.
  *
- * TODO(Phase 2): signup must not let clients self-assign the psychologist
- * role. The role must be set into `app_metadata` server-side (Supabase admin
- * API / auth hook) at account creation; client-supplied `user_metadata.role`
- * must never grant access.
+ * The psychologist role is assigned only by the server-side signup endpoint
+ * (`POST /auth/psychologist-signup`); client-supplied `user_metadata.role`
+ * is ignored by both Supabase Auth and the DB signup trigger.
  *
- * Phase 1 scope: the proxy only checks that a *session exists*. Real role
- * enforcement lives in RLS (Phase 2) and the API (Phase 3).
+ * Role enforcement lives here for routing, in RLS for data, and in the API
+ * for endpoints that use the service role.
  */
 
 export type Role = "patient" | "psychologist";
 
 const APP_ROLES: readonly string[] = ["patient", "psychologist"];
 
-/** Routes that never require a session. */
-export const PUBLIC_PATHS: ReadonlySet<string> = new Set(["/", "/login", "/signup"]);
+/** Routes that never require a session (auth pages + landing). */
+export const PUBLIC_PATHS: ReadonlySet<string> = new Set([
+  "/",
+  "/login",
+  "/signup",
+  "/signup/psychologist",
+]);
+
+const DASHBOARD: Record<Role, string> = {
+  patient: "/patient/dashboard",
+  psychologist: "/psychologist/dashboard",
+};
 
 export type GuardDecision = { type: "allow" } | { type: "redirect"; to: string };
 
@@ -44,19 +53,25 @@ export function getAppRole(user: unknown): Role | null {
 
 /**
  * Decide whether a pathname may be rendered.
- * - public paths always pass
+ * - public paths pass, but a signed-in user with a known role is sent to
+ *   their own dashboard (they have no business on /login, /signup, /)
  * - paths outside `/patient/*` and `/psychologist/*` are not ours to guard
- * - no session on a protected path → /login   (Phase 1 requirement)
+ * - no session on a protected path → /login
  * - session with a mismatched `app_metadata.role` → that role's own dashboard
- * - session without a known role → allowed through for now; real role
- *   enforcement arrives with RLS (Phase 2) and the API (Phase 3)
+ * - session without a known role → allowed; the role area layouts/pages
+ *   enforce verification and RLS enforces data access
  */
 export function guardPath(
   pathname: string,
   role: Role | null,
   hasSession: boolean,
 ): GuardDecision {
-  if (PUBLIC_PATHS.has(pathname)) return { type: "allow" };
+  if (PUBLIC_PATHS.has(pathname)) {
+    if (hasSession && role !== null) {
+      return { type: "redirect", to: DASHBOARD[role] };
+    }
+    return { type: "allow" };
+  }
 
   const isPatientArea = pathname === "/patient" || pathname.startsWith("/patient/");
   const isPsychologistArea =
@@ -66,7 +81,7 @@ export function guardPath(
 
   if (!hasSession) return { type: "redirect", to: "/login" };
 
-  // Session exists but role not yet assigned — allow; Phase 2/3 enforce.
+  // Session exists but role not yet assigned — allow; enforcement is RLS.
   if (role === null) return { type: "allow" };
 
   if (isPatientArea) {

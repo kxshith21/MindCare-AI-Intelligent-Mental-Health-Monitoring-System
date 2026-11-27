@@ -1,10 +1,12 @@
 import Link from "next/link";
+import { LogoutButton } from "@/components/logout-button";
 import { Badge } from "@/components/ui/badge";
 
 const NAV = [
   { href: "/patient/dashboard", label: "Dashboard" },
   { href: "/patient/chat", label: "Chat" },
   { href: "/patient/checkin", label: "Check-in" },
+  { href: "/patient/care-team", label: "Care team" },
 ];
 
 export default function PatientLayout({ children }: { children: React.ReactNode }) {
@@ -28,6 +30,7 @@ export default function PatientLayout({ children }: { children: React.ReactNode 
                 {item.label}
               </Link>
             ))}
+            <LogoutButton />
           </nav>
         </div>
       </header>

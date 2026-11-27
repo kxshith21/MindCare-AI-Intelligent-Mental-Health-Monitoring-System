@@ -1,15 +1,13 @@
 /**
- * Supabase clients (cookie-based sessions via @supabase/ssr).
+ * Supabase browser-side client (cookie-based sessions via @supabase/ssr).
  *
- * - Browser client for client components.
- * - Server client for Server Components / Route Handlers / Server Actions.
- * - The request proxy (src/proxy.ts) builds its own client against the
- *   incoming request cookies.
+ * Client components import from this module. The SERVER client lives in
+ * `lib/supabase-server.ts` — `next/headers` must never be pulled into a
+ * client bundle (it breaks the build).
  *
- * TODO(Phase 2): wire the real NEXT_PUBLIC_SUPABASE_* values into .env.local.
+ * The proxy (src/proxy.ts) builds its own client against request cookies.
  */
-import { cookies } from "next/headers";
-import { createBrowserClient, createServerClient } from "@supabase/ssr";
+import { createBrowserClient } from "@supabase/ssr";
 
 function getSupabaseEnv(): { url: string; anonKey: string } {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -22,7 +20,7 @@ function getSupabaseEnv(): { url: string; anonKey: string } {
   return { url, anonKey };
 }
 
-/** Supabase env is configured (Phase 2+). */
+/** Supabase env is configured. */
 export function hasSupabaseEnv(): boolean {
   return Boolean(process.env.NEXT_PUBLIC_SUPABASE_URL && process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY);
 }
@@ -31,28 +29,4 @@ export function hasSupabaseEnv(): boolean {
 export function createSupabaseBrowserClient() {
   const { url, anonKey } = getSupabaseEnv();
   return createBrowserClient(url, anonKey);
-}
-
-/** Client for Server Components, Route Handlers, and Server Actions. */
-export async function createSupabaseServerClient() {
-  const { url, anonKey } = getSupabaseEnv();
-  const cookieStore = await cookies();
-
-  return createServerClient(url, anonKey, {
-    cookies: {
-      getAll() {
-        return cookieStore.getAll();
-      },
-      setAll(cookiesToSet) {
-        try {
-          cookiesToSet.forEach(({ name, value, options }) =>
-            cookieStore.set(name, value, options),
-          );
-        } catch {
-          // Called from a Server Component where cookies are read-only —
-          // the proxy refreshes the session instead.
-        }
-      },
-    },
-  });
 }

@@ -36,6 +36,31 @@ describe("guardPath", () => {
     expect(guardPath("/", null, false)).toEqual({ type: "allow" });
     expect(guardPath("/login", null, false)).toEqual({ type: "allow" });
     expect(guardPath("/signup", null, false)).toEqual({ type: "allow" });
+    expect(guardPath("/signup/psychologist", null, false)).toEqual({ type: "allow" });
+  });
+
+  it("sends a signed-in user with a known role away from auth pages to their dashboard", () => {
+    expect(guardPath("/login", "patient", true)).toEqual({
+      type: "redirect",
+      to: "/patient/dashboard",
+    });
+    expect(guardPath("/signup", "psychologist", true)).toEqual({
+      type: "redirect",
+      to: "/psychologist/dashboard",
+    });
+    expect(guardPath("/signup/psychologist", "patient", true)).toEqual({
+      type: "redirect",
+      to: "/patient/dashboard",
+    });
+    expect(guardPath("/", "psychologist", true)).toEqual({
+      type: "redirect",
+      to: "/psychologist/dashboard",
+    });
+  });
+
+  it("keeps a signed-in session without a role on auth pages (no dashboard to pick yet)", () => {
+    expect(guardPath("/login", null, true)).toEqual({ type: "allow" });
+    expect(guardPath("/signup", null, true)).toEqual({ type: "allow" });
   });
 
   it("sends users without a session on protected routes to login", () => {

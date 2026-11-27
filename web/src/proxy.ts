@@ -1,19 +1,19 @@
 /**
  * Next.js 16 request proxy (formerly middleware.ts — renamed in Next 16).
  *
- * Runs before pages render. Phase 1 scope:
+ * Runs before pages render:
  * - no session on /patient/* or /psychologist/*  -> /login
  * - session with an app_metadata.role that mismatches the area
  *   -> that role's own dashboard
- * - session without a role yet -> allowed (real enforcement in Phases 2–3)
+ * - session without a role yet -> allowed (RLS still denies any data access)
  *
  * Sessions are read with @supabase/ssr's createServerClient + getUser().
  * The role comes only from app_metadata (see lib/guards.ts) and is forwarded
  * to pages via the x-user-role request header for display purposes only —
  * authorization is enforced by RLS + the API.
  *
- * TODO(Phase 2): once .env.local always carries NEXT_PUBLIC_SUPABASE_*,
- * remove the cookie-presence fallback below.
+ * If Supabase env vars are missing, protected routes fail closed to /login
+ * rather than trusting a bare auth cookie.
  */
 import { NextResponse, type NextRequest } from "next/server";
 import { createServerClient } from "@supabase/ssr";
@@ -22,13 +22,6 @@ import { getAppRole, guardPath } from "@/lib/guards";
 const SUPABASE_ENV_SET = Boolean(
   process.env.NEXT_PUBLIC_SUPABASE_URL && process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
 );
-
-/** Phase 1 fallback: is any Supabase auth cookie present at all? */
-function hasAuthCookie(request: NextRequest): boolean {
-  return request.cookies
-    .getAll()
-    .some((c) => c.name.startsWith("sb-") && c.name.endsWith("-auth-token"));
-}
 
 function redirectWithCookies(to: string, request: NextRequest, source: NextResponse) {
   const response = NextResponse.redirect(new URL(to, request.url));
@@ -40,10 +33,10 @@ function redirectWithCookies(to: string, request: NextRequest, source: NextRespo
 export async function proxy(request: NextRequest) {
   const pathname = request.nextUrl.pathname;
 
-  // Fallback when Supabase env isn't configured yet: only check that an auth
-  // cookie exists, so local dev works before .env.local is created.
+  // Fail closed: without Supabase config we cannot verify a session, so
+  // protected routes redirect to /login. Public routes remain accessible.
   if (!SUPABASE_ENV_SET) {
-    const decision = guardPath(pathname, null, hasAuthCookie(request));
+    const decision = guardPath(pathname, null, false);
     if (decision.type === "redirect") {
       return NextResponse.redirect(new URL(decision.to, request.url));
     }

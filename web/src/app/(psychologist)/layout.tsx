@@ -1,6 +1,9 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
+import { Suspense } from "react";
+import { LoadingState } from "@/components/loading-state";
 import { LogoutButton } from "@/components/logout-button";
+import { SessionWatcher } from "@/components/session-watcher";
 import { Badge } from "@/components/ui/badge";
 import {
   Card,
@@ -41,7 +44,19 @@ async function requireVerifiedPsychologist() {
   return { verified: profile?.verified === true };
 }
 
-export default async function PsychologistLayout({
+export default function PsychologistLayout({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
+  return (
+    <Suspense fallback={<LoadingState label="Checking your account…" />}>
+      <PsychologistShell>{children}</PsychologistShell>
+    </Suspense>
+  );
+}
+
+async function PsychologistShell({
   children,
 }: {
   children: React.ReactNode;
@@ -78,6 +93,7 @@ export default async function PsychologistLayout({
 
   return (
     <div className="flex min-h-screen flex-col">
+      <SessionWatcher />
       <header className="border-b bg-background">
         <div className="mx-auto flex h-14 max-w-5xl items-center justify-between gap-4 px-4">
           <div className="flex items-center gap-3">

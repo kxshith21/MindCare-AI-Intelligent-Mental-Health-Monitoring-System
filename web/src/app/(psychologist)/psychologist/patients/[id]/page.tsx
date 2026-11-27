@@ -1,19 +1,37 @@
-import { PagePlaceholder } from "@/components/page-placeholder";
+import { Suspense } from "react";
+import { LoadingState } from "@/components/loading-state";
+import { createSupabaseServerClient } from "@/lib/supabase-server";
+import { PatientDetail } from "./patient-detail";
 
-// Patient detail reads dynamic params on every request — not statically prerendered.
+// Patient detail reads dynamic params and session-scoped data on every request.
 export const instant = false;
 
-export default async function PsychologistPatientPage({
+export default function PsychologistPatientPage({
+  params,
+}: {
+  params: Promise<{ id: string }>;
+}) {
+  return (
+    <Suspense fallback={<LoadingState label="Loading this patient…" />}>
+      <PatientDetailPageContent params={params} />
+    </Suspense>
+  );
+}
+
+async function PatientDetailPageContent({
   params,
 }: {
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
+  const supabase = await createSupabaseServerClient();
+  const { data } = await supabase
+    .from("profiles")
+    .select("display_name")
+    .eq("id", id)
+    .maybeSingle();
+
   return (
-    <PagePlaceholder
-      title={`Patient ${id}`}
-      description="Per-patient trend chart (check-in scores over time), respecting the active care-link scope. Built in Phase 4."
-      route={`/psychologist/patients/${id}`}
-    />
+    <PatientDetail patientId={id} displayName={data?.display_name ?? "Patient"} />
   );
 }

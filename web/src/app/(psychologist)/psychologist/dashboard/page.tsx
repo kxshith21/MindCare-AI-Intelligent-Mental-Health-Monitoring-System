@@ -1,5 +1,7 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
+import { Suspense } from "react";
+import { LoadingState } from "@/components/loading-state";
 import { Badge } from "@/components/ui/badge";
 import {
   Card,
@@ -10,6 +12,7 @@ import {
 } from "@/components/ui/card";
 import { createSupabaseServerClient } from "@/lib/supabase-server";
 import { LinkDecision } from "./link-decision";
+import { RiskQueue } from "./risk-queue";
 
 // Reads the session + rows per request — not statically prerendered.
 export const instant = false;
@@ -33,7 +36,15 @@ interface ProfileRow {
  * without a name — the profiles policy only reveals patients with an ACTIVE
  * link (consent has not been established yet).
  */
-export default async function PsychologistDashboardPage() {
+export default function PsychologistDashboardPage() {
+  return (
+    <Suspense fallback={<LoadingState label="Loading your patients…" />}>
+      <PsychologistDashboardContent />
+    </Suspense>
+  );
+}
+
+async function PsychologistDashboardContent() {
   const supabase = await createSupabaseServerClient();
   const {
     data: { user },
@@ -154,9 +165,7 @@ export default async function PsychologistDashboardPage() {
         </CardContent>
       </Card>
 
-      <p className="text-sm text-muted-foreground">
-        Risk-event queue and per-patient trend charts arrive in Phase 4.
-      </p>
+      <RiskQueue />
     </div>
   );
 }

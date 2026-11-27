@@ -1,20 +1,24 @@
 # TODO / handoff notes
 
-## Phase 4 — connect the frontend
+## Phase 4 — connect the frontend ✅
 
-- [ ] Build patient chat UI against `POST /chat/message`,
+- [x] Build patient chat UI against `POST /chat/message`,
       `GET /chat/conversations`, and `GET /chat/conversations/{id}/messages`.
       Render `show_crisis_resources` prominently; never hide it behind a
       details toggle.
-- [ ] Build psychologist queue against `GET /psychologist/patients`,
+- [x] Build check-in UI against `POST /checkins` and `GET /checkins?from&to`,
+      including the PHQ-9 item-9 support path.
+- [x] Build psychologist queue against `GET /psychologist/patients`,
       `GET /psychologist/patients/{id}/trends`, `GET /psychologist/risk-events`,
-      and `PATCH /psychologist/risk-events/{id}`.
-- [ ] Show `risk_level` as a triage label with a “not a diagnosis” note.
+      `PATCH /psychologist/risk-events/{id}`, and clinician notes.
+- [x] Show `risk_level` as a triage label with a “not a diagnosis” note.
       Do not display rule ids or raw model internals to patients.
-- [ ] Add an explicit, confirmed account-deletion flow using
+- [x] Add an explicit, confirmed account-deletion flow using
       `DELETE /account` with `{ "confirm": "DELETE" }`.
-- [ ] Keep charts limited to check-in mood and PHQ-9/GAD-7 scores. Do not add a
+- [x] Keep charts limited to check-in mood and PHQ-9/GAD-7 scores. Do not add a
       synthetic “wellness score”.
+- [x] Document the BFF proxy, zod contracts, cookie auth, and safety rules in
+      [`FRONTEND.md`](FRONTEND.md).
 
 ## Phase 5 — deploy readiness
 

@@ -45,10 +45,15 @@ npm run dev                  # http://localhost:3000
 Tests / checks:
 
 ```bash
-npm test        # vitest (route-guard tests)
-npm run lint    # eslint
-npm run build   # production build
+npm test          # vitest (guards, API client, safety components)
+npm run typecheck # tsc --noEmit
+npm run lint      # eslint
+npm run test:e2e  # Playwright smoke tests (needs local Supabase + API)
+npm run build     # production build
 ```
+
+See [`docs/FRONTEND.md`](docs/FRONTEND.md) for the BFF proxy, zod validation,
+cookie-session auth, endpoint allowlist, and crisis-safety rules.
 
 ### Backend (`/api`)
 
@@ -80,7 +85,7 @@ pytest
 - **Phase 1** — repo cleanup + `/web` and `/api` scaffolding ✅
 - **Phase 2** — Supabase schema, auth, RLS ✅ ([RLS.md](docs/RLS.md), [DATA_MODEL.md](docs/DATA_MODEL.md))
 - **Phase 3** — AI + risk logic in FastAPI ✅ ([RISK.md](docs/RISK.md), [TODO.md](docs/TODO.md))
-- **Phase 4** — connect the frontend ⏳
+- **Phase 4** — connect the frontend ✅ ([FRONTEND.md](docs/FRONTEND.md))
 - **Phase 5** — docs and deploy readiness ⏳
 
 ## Known limits (by design)

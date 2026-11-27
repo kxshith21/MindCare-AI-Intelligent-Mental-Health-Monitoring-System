@@ -181,6 +181,24 @@ async def get_current_user(
     return CurrentUser(user_id=claims["sub"], role=extract_role(claims), claims=claims)
 
 
+async def get_access_token(
+    credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(_bearer_scheme)],
+) -> str:
+    """Return the raw JWT so routers can reuse it for RLS-scoped Supabase calls.
+
+    This dependency does not verify the token by itself; router endpoints that
+    use it also depend on `get_current_user` / `require_role`, so verification
+    always happens first.
+    """
+    if credentials is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Not authenticated",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    return credentials.credentials
+
+
 def require_role(*roles: Role) -> Callable[..., CurrentUser]:
     """Dependency factory: require a valid JWT *and* one of the given roles."""
 

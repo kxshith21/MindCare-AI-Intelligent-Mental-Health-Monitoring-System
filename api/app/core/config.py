@@ -1,6 +1,7 @@
 """Application configuration — all values come from environment variables."""
 
 from functools import lru_cache
+from typing import Literal
 
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -28,15 +29,35 @@ class Settings(BaseSettings):
     # CORS for the Next.js dev server / deployed web app
     cors_origins: str = "http://localhost:3000"
 
-    # LLM service layer (wired up in Phase 3)
-    llm_provider: str = "openai"
+    # LLM service layer. "openai" means any OpenAI-compatible /chat/completions
+    # endpoint; with the Groq base URL below this sends the Groq key, not an
+    # OpenAI key. "fake" is the no-network provider used by tests.
+    llm_provider: Literal["openai", "groq", "fake"] = "openai"
     llm_api_key: str = ""
-    llm_model: str = "gpt-4o-mini"
+    llm_model: str = "openai/gpt-oss-20b"
+    llm_base_url: str = "https://api.groq.com/openai/v1"
+    llm_timeout_seconds: float = 15.0
+    llm_max_retries: int = 1
+    chat_prompt_version: str = "chat_system_v1"
 
-    @field_validator("supabase_url")
+    @field_validator("supabase_url", "llm_base_url")
     @classmethod
     def strip_trailing_slash(cls, v: str) -> str:
         return v.rstrip("/")
+
+    @field_validator("llm_timeout_seconds")
+    @classmethod
+    def positive_timeout(cls, v: float) -> float:
+        if v <= 0:
+            raise ValueError("llm_timeout_seconds must be positive")
+        return v
+
+    @field_validator("llm_max_retries")
+    @classmethod
+    def non_negative_retries(cls, v: int) -> int:
+        if v < 0:
+            raise ValueError("llm_max_retries cannot be negative")
+        return v
 
     @property
     def jwks_url(self) -> str:

@@ -64,7 +64,7 @@ scores and mood values.
 |---|---|---|
 | 0 | Read-only audit → `docs/AUDIT.md` | ✅ done |
 | 1 | Repo cleanup, `/web` + `/api` scaffolding | ✅ done |
-| 2 | Supabase schema, auth, RLS, care-link flow | ⏳ |
+| 2 | Supabase schema, auth, RLS, care-link flow | ✅ done |
 | 3 | Port AI + risk logic into FastAPI | ⏳ |
 | 4 | Connect the frontend | ⏳ |
 | 5 | Docs + deploy readiness | ⏳ |

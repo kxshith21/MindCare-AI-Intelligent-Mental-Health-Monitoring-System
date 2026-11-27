@@ -73,7 +73,7 @@ pytest
 
 - **Phase 0** — read-only audit: [`docs/AUDIT.md`](docs/AUDIT.md) ✅
 - **Phase 1** — repo cleanup + `/web` and `/api` scaffolding ✅
-- **Phase 2** — Supabase schema, auth, RLS ⏳
+- **Phase 2** — Supabase schema, auth, RLS ✅ ([RLS.md](docs/RLS.md), [DATA_MODEL.md](docs/DATA_MODEL.md))
 - **Phase 3** — AI + risk logic in FastAPI ⏳
 - **Phase 4** — connect the frontend ⏳
 - **Phase 5** — docs and deploy readiness ⏳

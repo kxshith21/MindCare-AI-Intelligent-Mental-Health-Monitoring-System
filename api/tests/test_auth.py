@@ -16,6 +16,7 @@ from fastapi.testclient import TestClient
 
 from app.core import auth
 from app.core.auth import AuthError, decode_token, extract_role, get_current_user, require_role
+from app.core.config import get_settings
 
 ISSUER = "https://test-project.supabase.co/auth/v1"
 
@@ -86,6 +87,16 @@ def client(monkeypatch: pytest.MonkeyPatch, key_pair: tuple[bytes, dict]) -> Tes
         return {"ok": True}
 
     return TestClient(test_app)
+
+
+# ---------------------------------------------------------------------------
+# Test isolation
+# ---------------------------------------------------------------------------
+
+
+def test_settings_use_fake_issuer_not_local_env() -> None:
+    """A local api/.env must never change the issuer used by these tests."""
+    assert get_settings().token_issuer == ISSUER
 
 
 # ---------------------------------------------------------------------------

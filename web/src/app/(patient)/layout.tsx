@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { LogoutButton } from "@/components/logout-button";
+import { SessionWatcher } from "@/components/session-watcher";
 import { Badge } from "@/components/ui/badge";
 
 const NAV = [
@@ -7,11 +8,13 @@ const NAV = [
   { href: "/patient/chat", label: "Chat" },
   { href: "/patient/checkin", label: "Check-in" },
   { href: "/patient/care-team", label: "Care team" },
+  { href: "/patient/settings", label: "Settings" },
 ];
 
 export default function PatientLayout({ children }: { children: React.ReactNode }) {
   return (
     <div className="flex min-h-screen flex-col">
+      <SessionWatcher />
       <header className="border-b bg-background">
         <div className="mx-auto flex h-14 max-w-5xl items-center justify-between gap-4 px-4">
           <div className="flex items-center gap-3">

@@ -1,5 +1,7 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
+import { Suspense } from "react";
+import { LoadingState } from "@/components/loading-state";
 import { Badge } from "@/components/ui/badge";
 import {
   Card,
@@ -11,6 +13,7 @@ import {
 import { createSupabaseServerClient } from "@/lib/supabase-server";
 import { InviteForm } from "./invite-form";
 import { RevokeButton } from "./revoke-button";
+import { ShareScopeSelect } from "./share-scope-select";
 
 // Reads the session + rows per request — not statically prerendered.
 export const instant = false;
@@ -41,7 +44,15 @@ const STATUS_LABEL: Record<CareLinkRow["status"], string> = {
  * status/scope, revoke. All reads go through RLS — a patient only ever sees
  * their own links and the profile rows of psychologists on those links.
  */
-export default async function CareTeamPage() {
+export default function CareTeamPage() {
+  return (
+    <Suspense fallback={<LoadingState label="Loading your care team…" />}>
+      <CareTeamContent />
+    </Suspense>
+  );
+}
+
+async function CareTeamContent() {
   const supabase = await createSupabaseServerClient();
   const {
     data: { user },
@@ -129,10 +140,16 @@ export default async function CareTeamPage() {
                         : "summary only (scores and mood)"}
                     </span>
                   </div>
-                  <div className="flex items-center gap-2">
+                  <div className="flex flex-wrap items-center gap-2">
                     <Badge variant={link.status === "active" ? "default" : "secondary"}>
                       {STATUS_LABEL[link.status]}
                     </Badge>
+                    {(link.status === "pending" || link.status === "active") && (
+                      <ShareScopeSelect
+                        linkId={link.id}
+                        initialScope={link.share_scope}
+                      />
+                    )}
                     {(link.status === "pending" || link.status === "active") && (
                       <RevokeButton linkId={link.id} />
                     )}

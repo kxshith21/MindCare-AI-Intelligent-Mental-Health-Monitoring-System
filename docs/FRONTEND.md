@@ -1,4 +1,4 @@
-# Frontend ↔ backend contract (Phase 4)
+# Frontend ↔ backend contract (Phase 4, reviewed in Phase 5)
 
 ## Calling FastAPI from the browser
 
@@ -71,6 +71,26 @@ risk events.
   changed with updates guarded by the database trigger.
 - `SessionWatcher` keeps server-rendered pages in sync with cookie changes.
 
+## Signup consent and legal pages
+
+Patient signup has two required acknowledgments before submission:
+
+1. acceptance of the draft Terms and Privacy pages and acknowledgment that the
+   app is not a crisis service;
+2. confirmation that the user is 18 or older.
+
+On acceptance, the browser sends the boolean metadata keys
+`terms_accepted`, `privacy_accepted`, `crisis_notice_acknowledged`,
+`age_18_plus`, and `consent_document_version` to Supabase Auth. The server-side
+trigger stamps `profiles.consent_at`, `profiles.consent_version`, and
+`profiles.age_confirmed_at`. These values are audit metadata only; authorization
+still depends on role, verification, and care links.
+
+Draft information pages are available at `/privacy`, `/terms`, and `/safety`.
+`/privacy` and `/terms` show `DRAFT - requires legal review before launch`.
+They are linked from the footer and from signup. They are placeholders for
+lawyer review and make no data-protection compliance claims.
+
 ## Safety rules in the UI
 
 - Crisis resources render from a static fallback list mirrored from
@@ -82,11 +102,13 @@ risk events.
   model internals.
 - Clinician risk triage labels are shown only in the psychologist review queue,
   with “not a diagnosis” context.
-- Charts plot real check-in mood and PHQ-9/GAD-7 scores only. There is no
-  synthetic “wellness score”.
-- Allowed diagnostic phrasing is exactly:
+- Charts plot real check-in mood and PHQ-9/GAD-7 screening scores only. There is
+  no invented composite score.
+- Allowed screening-accuracy phrasing is exactly:
   - “These are screening questions used by clinicians. They are not a diagnosis.”
   - “Screening scores can change from week to week and are not a diagnosis.”
+- When `CHAT_ENABLED=false`, chat returns a safe unavailable message with
+  crisis resources and performs no storage, model call, or risk-event write.
 - No outbound email/SMS is triggered anywhere in the frontend.
 
 ## Local verification

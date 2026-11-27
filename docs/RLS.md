@@ -1,138 +1,128 @@
-# Phase 2 — Roles, verification and RLS
+# Row Level Security (current migrations)
 
-This document describes the **implemented and locally tested** Phase 2 authorization
-model. Tests: `supabase/tests/rls_test.sql` (13 scenarios, all passing after
-`supabase db reset` on a fresh local database).
+This matrix was re-derived from the SQL in `supabase/migrations/0001`–`0012`
+plus `20261127000001_consent.sql`. It describes the deployed schema after a
+full `supabase db reset`. RLS is enabled on every application table. `anon` has
+no table privileges at all.
 
-> This is not a crisis service. Nothing in this layer sends email/SMS, diagnoses,
-> or invents a wellness score.
+Roles in the matrix:
 
-## 1. Source of truth for role
+- **Patient** — authenticated user with `app_metadata.role = 'patient'`.
+- **Psychologist** — authenticated user with `app_metadata.role =
+  'psychologist'`. Verified means `psychologist_profiles.verified = true`.
+- **Service** — service-role/server SQL, which bypasses RLS by design.
+- **Actor** — `auth.uid()` from the JWT, never `user_metadata`.
 
-| Layer | Role source | Notes |
-|---|---|---|
-| Supabase Auth | `auth.users.raw_app_meta_data->>'role'` | Server-controlled. Clients only write `user_metadata`, which is never read for authorization. |
-| Database trigger | `handle_new_user()` on `auth.users` INSERT | Creates `profiles`; `role = coalesce(app_metadata.role, 'patient')`, coerced to `patient` if unknown. |
-| Database trigger | `handle_user_role_update()` on `auth.users` UPDATE OF `raw_app_meta_data` | Supabase Admin API inserts the user first and patches `app_metadata` afterwards. This reconciles `profiles.role` and creates the **unverified** `psychologist_profiles` row when the patched role is `psychologist` (migration 0011). |
-| API | JWT `app_metadata.role` | Used for endpoint role gates only. Data authorization is RLS. |
-| Web | `app_metadata.role` via `getAppRole()` in `web/src/lib/guards.ts` | Routing only; never trusts `user_metadata`. |
+## Policy matrix
 
-Client signup (`/signup`) has no role field and always becomes `patient`.
-`POST /auth/psychologist-signup` is the **only** path that assigns
-`app_metadata.role = 'psychologist'`; it uses the service-role key server-side.
-The request schema has no `role` field, so a client cannot supply one.
+| Table | Role | Operation | Condition |
+|---|---|---|---|
+| `profiles` | Patient/Psychologist | SELECT | `id = auth.uid()` |
+| `profiles` | Patient | SELECT | linked psychologist on any of the patient's care links, including pending |
+| `profiles` | Verified psychologist | SELECT | `has_active_link(profiles.id)`; active link to that patient |
+| `profiles` | Patient/Psychologist | UPDATE | own row only, and only the `display_name` / `region` columns are granted |
+| `profiles` | Client | INSERT/DELETE | none |
+| `psychologist_profiles` | Owner | SELECT | `user_id = auth.uid()` |
+| `psychologist_profiles` | Client | INSERT/UPDATE/DELETE | none; `verified` is server-managed only |
+| `care_links` | Patient/Psychologist | SELECT | `patient_id = auth.uid()` or `psychologist_id = auth.uid()` |
+| `care_links` | Patient/Psychologist | UPDATE | either party, with `care_links_before_update()` enforcing accept/revoke/scope rules |
+| `care_links` | Client | INSERT/DELETE | none; insert occurs through `invite_psychologist()` |
+| `checkins` | Patient | SELECT | `patient_id = auth.uid()` |
+| `checkins` | Patient | INSERT | `patient_id = auth.uid()` |
+| `checkins` | Patient | DELETE | `patient_id = auth.uid()` |
+| `checkins` | Psychologist | direct SELECT | none; use `shared_checkins()` for active-link access |
+| `checkins` | Client | UPDATE | none; computed scores are immutable |
+| `conversations` | Patient | SELECT/INSERT | `patient_id = auth.uid()` |
+| `conversations` | Client/Psychologist | UPDATE/DELETE | none |
+| `messages` | Patient | SELECT | `patient_id = auth.uid()` |
+| `messages` | Verified psychologist | SELECT | active link with `link_scope(patient_id) = 'full'` |
+| `messages` | Patient | INSERT | own `patient_id` and `sender = 'user'` only |
+| `messages` | Client | UPDATE/DELETE | none |
+| `risk_events` | Patient | SELECT | `patient_id = auth.uid()` |
+| `risk_events` | Verified psychologist | SELECT | `has_active_link(patient_id)` |
+| `risk_events` | Verified psychologist | UPDATE | active link; trigger pins `reviewed_by` to actor; column grant allows only `status`, `reviewed_by`, `reviewed_at` |
+| `risk_events` | Client | INSERT/DELETE | none; API writes with service role |
+| `clinician_notes` | Authoring psychologist | SELECT/INSERT/UPDATE/DELETE | `psychologist_id = auth.uid()` and active link to the patient |
+| `clinician_notes` | Patient | any | none, by product decision |
+| `audit_log` | Client | INSERT | `actor_id = auth.uid()` |
+| `audit_log` | Client | SELECT | `actor_id = auth.uid()` or `target_patient_id = auth.uid()` |
+| `audit_log` | Client | UPDATE/DELETE | none |
 
-## 2. Verification
+Service-role paths used by the API: psychologist signup, assistant message
+writes, risk-event inserts, and account deletion. These are not browser paths.
 
-A psychologist can log in immediately but sees **no patient data** until
-`psychologist_profiles.verified = true`. No client UPDATE policy or column grant
-exists for `verified`, so it cannot be self-set (test 4.6).
+## Helper predicates
 
-Manual verification (admin only, local SQL / Studio SQL editor):
+All helpers are `SECURITY DEFINER`, `STABLE` where applicable, `set search_path
+= ''`, fully qualified, and executable only by `authenticated`/`service_role`.
 
-```sql
--- Find the applicant by email, then verify their license manually.
-select id, email from auth.users where email = 'applicant@example.com';
-
-update public.psychologist_profiles
-   set verified = true, verified_at = now()
- where user_id = '00000000-0000-0000-0000-000000000000'; -- paste the id above
-```
-
-Studio alternative: Table Editor → `psychologist_profiles` → edit the row →
-set `verified` to `true` (and optionally `verified_at`). Both paths run as the
-table owner / service role, not as the applicant.
-
-The web layer renders an "Account awaiting verification" screen for unverified
-accounts instead of the dashboard. RLS denies the data independently.
-
-## 3. Access helpers
-
-All helpers are `SECURITY DEFINER`, `STABLE`, `set search_path = ''`, with
-EXECUTE revoked from `public`/`anon` and granted to `authenticated`/`service_role`.
-
-| Function | Returns |
+| Function | Result |
 |---|---|
-| `is_verified_psychologist()` | true only if caller is a psychologist with `verified = true` |
-| `has_active_link(patient)` | true only for a verified psychologist with an `active` link to that patient |
-| `link_scope(patient)` | `'summary_only'` / `'full'` for an **active** link, otherwise `NULL` |
+| `is_verified_psychologist()` | Caller has role `psychologist` and a verified profile row. |
+| `has_active_link(patient)` | Caller is a verified psychologist with an `active` link to that patient. |
+| `link_scope(patient)` | `full` only for a verified psychologist with an active link; otherwise `NULL`. |
 
-`NULL` means no access. Policies use `(select auth.uid())` and every predicate
-column is indexed (see `DATA_MODEL.md`).
+These helpers are the only place cross-table privilege logic lives, which
+prevents recursive RLS evaluation. No policy reads `user_metadata`.
 
-## 4. Policy matrix
+## Triggers and immutability
 
-`P` = patient (owner), `Psy` = verified psychologist, `Unv` = unverified psychologist.
-All other rows are denied by default; `anon` has no grants on any `public` table.
+- `handle_new_user()` creates the profile from server-controlled
+  `app_metadata.role`; client-supplied roles in `user_metadata` are ignored.
+- `handle_user_role_update()` reconciles server-side role changes made by the
+  Auth Admin API.
+- `profiles_before_update()` makes `id`, `created_at`, and the Phase 5 consent
+  columns immutable for everyone. `role` is immutable for clients but may be
+  changed by trusted server SQL/Auth triggers. `display_name` and `region`
+  remain editable by the owner.
+- `care_links_before_update()` makes revoked links terminal, restricts
+  acceptance to the psychologist, revocation to either party, and scope changes
+  to the patient.
+- `checkins_compute_scores()` recomputes screening totals from answers on
+  insert.
+- `messages_check_conversation()` prevents cross-patient message writes.
+- `risk_events_before_write()` pins the reviewer identity and timestamp.
 
-| Table | Operation | Allowed when |
-|---|---|---|
-| `profiles` | SELECT | own row; or psychologist with active link to that patient; or patient reading a psychologist on any of their links |
-| `profiles` | UPDATE | own row, `display_name`/`region` only; trigger freezes `id`, `role`, `created_at` |
-| `profiles` | INSERT | trigger only (server side) |
-| `psychologist_profiles` | SELECT | own row only |
-| `psychologist_profiles` | UPDATE / INSERT / DELETE | never for clients; `verified` is server-managed |
-| `care_links` | SELECT | patient or psychologist party only |
-| `care_links` | INSERT | only via `invite_psychologist(email, share_scope)` (SECURITY DEFINER) |
-| `care_links` | UPDATE | parties only, plus transition trigger: accept = psychologist, decline/end/revoke = either party, `share_scope` change = patient only, ownership + timestamps immutable, revoked is terminal |
-| `care_links` | DELETE | never for clients (revocation is a status change) |
-| `checkins` | SELECT / INSERT / DELETE | patient, own rows only |
-| `checkins` | UPDATE | never; scores are computed by trigger and are immutable |
-| `checkins` (via `shared_checkins`) | SELECT | verified psychologist + active link; `mood`/scores/date always; `note` and raw answers only when `share_scope = 'full'` |
-| `conversations` | SELECT / INSERT | patient, own rows only |
-| `messages` | SELECT | patient own; or verified psychologist + active link with `link_scope = 'full'` |
-| `messages` | INSERT | patient own, `sender = 'user'` only (assistant rows are written by the API with the service role) |
-| `messages` | UPDATE / DELETE | never for clients |
-| `risk_events` | SELECT | patient own; or verified psychologist with active link |
-| `risk_events` | UPDATE | verified psychologist with active link, only `status`/`reviewed_by`/`reviewed_at`; trigger pins `reviewed_by` to actor |
-| `risk_events` | INSERT / DELETE | never for clients (API service role only) |
-| `clinician_notes` | SELECT / INSERT / UPDATE / DELETE | authoring psychologist only, and only while an active link exists |
-| `audit_log` | INSERT | authenticated, `actor_id = auth.uid()` only (spoofed actor rejected) |
-| `audit_log` | SELECT | rows where actor is self or `target_patient_id` is self |
-| `audit_log` | UPDATE / DELETE | never for clients |
+## RPC authorization
 
-`anon` cannot read any `public` table and cannot call the RPCs. Pending or
-revoked links grant **no** data access, and unverified psychologists see nothing
-even with an active link (tests 4 and 5).
+| RPC | Authorization |
+|---|---|
+| `invite_psychologist(email, scope)` | Patient only; target must be a verified psychologist; identical generic response for every lookup outcome. |
+| `shared_checkins(patient)` | Verified psychologist with an active link; `note` and raw answer arrays only when `share_scope = 'full'`. |
+| `record_patient_access(patient, action)` | Verified psychologist with an active link; appends an audit row. |
+| `delete_my_data()` | Patient only; removes patient-owned app data and anonymizes audit identity columns. |
 
-## 5. RPCs (all `SECURITY DEFINER`, `search_path = ''`)
+`EXECUTE` on every RPC is revoked from `PUBLIC` and `anon` and granted to
+`authenticated` and `service_role`.
 
-| Function | Caller | Behavior |
-|---|---|---|
-| `invite_psychologist(email, share_scope)` | patient only | Returns the **same generic JSON** for existing, non-existing, unverified, and non-psychologist emails. Target must be a verified psychologist; creates `pending` link with `consented_at = now()`. No enumeration. |
-| `shared_checkins(patient)` | verified psychologist + active link | Returns mood, computed scores, date; `note`/answers only under `full`. |
-| `record_patient_access(patient, action)` | verified psychologist + active link | Appends an `audit_log` row. The API must call this every time a psychologist views patient data. |
-| `delete_my_data()` | patient only | Deletes the caller's messages, conversations, risk events, check-ins, care links and clinician notes *about* them; anonymizes audit identity columns and appends an identity-free `data_deleted` marker. Profile and `auth.users` row remain. |
+## Product decisions
 
-EXECUTE is revoked from `public` and `anon` for every RPC.
+1. **Role source** — `app_metadata.role` only. A browser signup cannot choose
+   the psychologist role.
+2. **Verification gate** — patients can only share with verified
+   psychologists. Unverified psychologist accounts cannot read patient data.
+3. **Consent-based scope** — `summary_only` exposes mood and screening totals;
+   `full` additionally exposes check-in notes and raw questionnaire answers.
+4. **Pending links** — names of linked psychologists are visible to the
+   patient, but pending links grant no patient-data access.
+5. **Revocation is terminal** — a revoked care link cannot be edited or
+   reactivated; a new invitation is required.
+6. **Private clinician notes** — patients deliberately have no read policy on
+   `clinician_notes`.
+7. **Message visibility** — message text requires an active `full` link. Risk
+   queue entries never include message text for `summary_only` links.
+8. **Access accountability** — every psychologist data read appends an
+   `audit_log` row visible to the patient.
+9. **Consent metadata is not authorization** — the Phase 5 `profiles` consent
+   columns record what the signup UI acknowledged. Access still depends only
+   on role, verification, and active care links.
+10. **Deletion** — patient data is removed through `delete_my_data()` plus the
+    API `DELETE /account` path; audit identity is anonymized rather than
+    silently dropped.
 
-## 6. Product decisions
+## Deployment verification
 
-- **Consent at invite, visibility at accept.** The patient's `consented_at` is
-  stamped when the invite is created; the psychologist still must accept before
-  any data is visible. Pending invitations show no patient name in the web UI.
-- **Clinician notes are private to the author.** Patients deliberately cannot
-  read them — this is a product choice, not an RLS oversight. Deleting patient
-  data also deletes notes about that patient.
-- **Risk events carry a short generated `reason`, not message content.** Raw
-  message text lives only in `messages`, which is gated by `link_scope = 'full'`.
-  `message_id` is an identifier, not content.
-- **`summary_only` still reveals display name/region** of an actively linked
-  patient (needed for the active-patient list); notes, answers and messages do
-  not flow until the patient grants `full`.
-- **Audit privacy.** A patient sees rows targeting them plus rows they acted on
-  themselves; a psychologist sees their own audit rows. No one edits history.
-- **Deletion is two-phase.** `delete_my_data()` removes patient data now;
-  account deletion (`auth.users`) is a service-role API endpoint reserved for
-  Phase 3 (TODO).
-
-## 7. Verification commands used
-
-```bash
-supabase start
-supabase db reset
-# RLS test script is piped into the local DB container (see file header)
-supabase/tests/rls_test.sql  # ends with "=== ALL 13 RLS SCENARIOS PASSED ==="
-cd api && python -m pytest -q
-cd web && npm test && npm run lint && npm run build
-```
+Run [`supabase/verify_rls.sql`](../supabase/verify_rls.sql) against the target
+database. It must return zero rows; each returned row names a `public` table
+with RLS disabled. The local `supabase/tests/rls_test.sql` suite also asserts
+policies, triggers, RPC behavior, and the Phase 5 consent fields.

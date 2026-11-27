@@ -1,12 +1,12 @@
-# Risk triage design (Phase 3)
+# Risk triage design (Phase 3, reviewed in Phase 5)
 
-**This is not a crisis service.** Risk output is a triage signal for a human
-reviewer. It is never a diagnosis, never a prediction, never a guarantee of
-safety, and never a “wellness score”.
+**This is not a crisis service.** Risk output is an imperfect triage signal for
+a human reviewer. It is not a clinical assessment, not a prediction, and not a
+guarantee of safety. It can miss signals and can produce false positives.
 
 ## Signals
 
-Two independent signals run on every `POST /chat/message`:
+Two independent signals run on every enabled `POST /chat/message`:
 
 1. **LLM structured output** (`api/app/services/llm.py`) using the versioned
    system prompt `api/app/prompts/chat_system_v1.md`. It returns
@@ -57,10 +57,9 @@ never the note text or questionnaire answers.
 ## Fail-safe behavior
 
 The LLM call is validated locally with Pydantic. Any timeout, HTTP error,
-transport error, malformed JSON, missing keys, invalid enum, or schema
-mismatch becomes a short internal category such as `timeout`, `invalid_json`,
-or `invalid_output`. One retry is configured by default via
-`LLM_MAX_RETRIES=1`.
+transport error, malformed JSON, missing keys, invalid enum, or schema mismatch
+becomes a short internal category such as `timeout`, `invalid_json`, or
+`invalid_output`. One retry is configured by default via `LLM_MAX_RETRIES=1`.
 
 On failure:
 
@@ -71,7 +70,15 @@ On failure:
 
 No raw model output, no user content, and no API keys appear in logs. The chat
 log line includes ids, signal levels, stable matched rule ids, error category,
-and latency only.
+and latency only. Structured request logs record request id, sanitized path,
+status, and latency.
+
+### Kill switch
+
+`CHAT_ENABLED=false` short-circuits `POST /chat/message` before rate limiting,
+region lookup, database work, LLM calls, and risk-event writes. It returns HTTP
+200 with a safe unavailable reply and non-empty crisis resources. This is the
+incident kill switch described in [`OPERATIONS.md`](OPERATIONS.md).
 
 ## Rules engine details
 
@@ -114,7 +121,8 @@ includes Tele-MANAS `14416` and emergency `112`.
 
 Every resource carries `last_verified`. These numbers and URLs can change and
 must be re-verified before launch. The API never invents a number in the LLM
-reply itself; the prompt explicitly forbids it.
+reply itself; the prompt explicitly forbids it. A static frontend fallback list
+mirrors the API list so support information still renders when the API fails.
 
 ## Persistence and visibility
 
@@ -131,14 +139,16 @@ reply itself; the prompt explicitly forbids it.
 ## Deliberately absent
 
 - No outbound email/SMS — no `email_alert.py` equivalent.
-- No diagnosis, medication advice, or treatment plan.
-- No “detects suicide” claim, no certainty language, and no promise that the
-  AI can keep someone safe.
-- No synthetic mood chart or invented wellness score.
+- No medication advice or treatment plan.
+- No certainty or guarantee language, and no promise that the AI can keep
+  someone safe.
+- No synthetic mood series or invented composite score.
+- No clinical assessment claim.
 
 ## Configuration
 
-See `api/.env.example`. Exact variables used by Phase 3:
+See `api/.env.example`. Exact variables used by Phase 3 and the Phase 5 kill
+switch:
 
 ```text
 LLM_PROVIDER=openai
@@ -148,6 +158,7 @@ LLM_BASE_URL=https://api.groq.com/openai/v1
 LLM_TIMEOUT_SECONDS=15
 LLM_MAX_RETRIES=1
 CHAT_PROMPT_VERSION=chat_system_v1
+CHAT_ENABLED=true
 ```
 
 `openai` here means any OpenAI-compatible `/chat/completions` endpoint; with

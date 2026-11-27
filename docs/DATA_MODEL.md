@@ -1,108 +1,214 @@
-# Phase 2 — Data model
+# Data model
 
-Implemented in `supabase/migrations/` (12 ordered files). All tables are in
-`public`; RLS is enabled on every one. See `RLS.md` for the policy matrix.
+This document reflects the migrations in `supabase/migrations/` in order,
+including `20261127000001_consent.sql`. All application tables live in
+`public`. RLS is enabled on every one; see [`RLS.md`](RLS.md) for the policy
+matrix. Supabase Auth remains authoritative for identities and roles.
 
+## Entity relationship diagram
+
+```mermaid
+erDiagram
+  AUTH_USERS ||--|| PROFILES : "on_auth_user_created"
+  PROFILES ||--o| PSYCHOLOGIST_PROFILES : "psychologist only"
+  PROFILES ||--o{ CARE_LINKS : "patient"
+  PROFILES ||--o{ CARE_LINKS : "psychologist"
+  PROFILES ||--o{ CHECKINS : "patient"
+  PROFILES ||--o{ CONVERSATIONS : "patient"
+  PROFILES ||--o{ RISK_EVENTS : "patient"
+  PROFILES ||--o{ RISK_EVENTS : "reviewed_by"
+  PROFILES ||--o{ CLINICIAN_NOTES : "psychologist"
+  PROFILES ||--o{ CLINICIAN_NOTES : "patient"
+  PROFILES ||--o{ AUDIT_LOG : "actor"
+  PROFILES ||--o{ AUDIT_LOG : "target patient"
+  CONVERSATIONS ||--o{ MESSAGES : "conversation_id"
+  MESSAGES ||--o| RISK_EVENTS : "message_id (SET NULL)"
+
+  AUTH_USERS {
+    uuid id PK
+    jsonb raw_app_meta_data "server-controlled role"
+    jsonb raw_user_meta_data "client-supplied display name, region, consent"
+  }
+  PROFILES {
+    uuid id PK "FK auth.users.id ON DELETE CASCADE"
+    text role "patient | psychologist"
+    text display_name
+    text region "ISO alpha-2 or NULL"
+    timestamptz created_at
+    timestamptz consent_at "Phase 5"
+    text consent_version "Phase 5"
+    timestamptz age_confirmed_at "Phase 5"
+  }
+  PSYCHOLOGIST_PROFILES {
+    uuid user_id PK "FK profiles.id ON DELETE CASCADE"
+    text license_no
+    boolean verified
+    timestamptz verified_at
+  }
+  CARE_LINKS {
+    uuid id PK
+    uuid patient_id FK
+    uuid psychologist_id FK
+    text status "pending | active | revoked"
+    text share_scope "summary_only | full"
+    timestamptz invited_at
+    timestamptz consented_at
+    timestamptz revoked_at
+  }
+  CHECKINS {
+    uuid id PK
+    uuid patient_id FK
+    smallint mood "1-5"
+    text note "<=4000 chars"
+    int_array phq9_answers "9 values, 0-3"
+    int_array gad7_answers "7 values, 0-3"
+    smallint phq9_score "computed"
+    smallint gad7_score "computed"
+    timestamptz created_at
+  }
+  CONVERSATIONS {
+    uuid id PK
+    uuid patient_id FK
+    timestamptz created_at
+  }
+  MESSAGES {
+    uuid id PK
+    uuid conversation_id FK
+    uuid patient_id FK
+    text sender "user | assistant"
+    text content "1-8000 chars"
+    timestamptz created_at
+    text prompt_version "assistant rows only"
+    text model "assistant rows only"
+  }
+  RISK_EVENTS {
+    uuid id PK
+    uuid patient_id FK
+    uuid message_id FK "SET NULL"
+    text level "low | elevated | high"
+    text reason "category label only"
+    text status "new | acknowledged | resolved"
+    uuid reviewed_by FK
+    timestamptz reviewed_at
+    timestamptz created_at
+  }
+  CLINICIAN_NOTES {
+    uuid id PK
+    uuid psychologist_id FK
+    uuid patient_id FK
+    text note "1-8000 chars"
+    timestamptz created_at
+  }
+  AUDIT_LOG {
+    uuid id PK
+    uuid actor_id FK "SET NULL"
+    text action "<=100 chars"
+    uuid target_patient_id FK "SET NULL"
+    timestamptz created_at
+  }
 ```
-auth.users (Supabase Auth)
-   │ 1:1  handle_new_user() on INSERT
-   ▼
-profiles ──1:N──> care_links <──1:N── profiles (psychologist side)
-   │                  │
-   │                  │ active link gates all clinician reads
-   ├──1:N──> psychologist_profiles (psychologists only, verified=false)
-   ├──1:N──> checkins
-   ├──1:N──> conversations ──1:N──> messages
-   ├──1:N──> risk_events ──> messages (message_id, ON DELETE SET NULL)
-   ├──1:N──> clinician_notes (author = psychologist, subject = patient)
-   └──1:N──> audit_log (actor_id / target_patient_id, ON DELETE SET NULL)
-```
 
-`profiles.id = auth.users.id` with `ON DELETE CASCADE`. `psychologist_profiles.user_id`
-references `profiles.id`; it is a primary key, so one psychologist profile per user.
+## Tables and constraints
 
-Two `auth.users` triggers manage role provisioning:
+### `profiles`
 
-- `handle_new_user()` (AFTER INSERT) creates `profiles` from
-  `raw_app_meta_data->>'role'`, defaulting to `patient`.
-- `handle_user_role_update()` (AFTER UPDATE OF `raw_app_meta_data`, migration
-  0011) reconciles `profiles.role` when Supabase's Admin API patches
-  `app_metadata` after INSERT, and inserts an unverified
-  `psychologist_profiles` row for `psychologist`. Client role changes remain
-  impossible; `profiles_before_update()` only permits a role change when
-  `auth.uid()` is NULL (trusted server-side SQL).
+One row per Auth user. `id = auth.users.id` with `ON DELETE CASCADE`. `role`
+comes from `raw_app_meta_data->>'role'`, never from user metadata; a client
+signup becomes `patient`. `display_name` is 1–120 characters; `region`, when
+present, is normalized to a two-letter uppercase code.
 
-## Tables
+Phase 5 adds optional consent columns: `consent_at`, `consent_version`, and
+`age_confirmed_at`. They are stamped once by `handle_new_user()` when signup
+metadata carries the corresponding acknowledgments. Existing users and
+server-created psychologist accounts keep `NULL` values; signup is never
+blocked by missing consent metadata. `profiles_before_update()` makes these
+columns immutable. Clients have only column-level `UPDATE` on `display_name`
+and `region`.
 
-| Table | Columns | Constraints / computed behavior |
-|---|---|---|
-| `profiles` | `id` (PK/FK), `role`, `display_name`, `region`, `created_at` | `role in ('patient','psychologist')`; `region` nullable ISO alpha-2. Trigger freezes `id`, `role`, `created_at`; normalizes `region`. |
-| `psychologist_profiles` | `user_id` (PK/FK), `license_no`, `verified`, `verified_at` | `verified default false`; no client UPDATE policy/grant. |
-| `care_links` | `id`, `patient_id`, `psychologist_id`, `status`, `share_scope`, `invited_at`, `consented_at`, `revoked_at` | `status in (pending,active,revoked)`; `share_scope in (summary_only,full)`; no self-links; unique live `(patient_id, psychologist_id)`; revoked rows frozen and require `revoked_at`; BEFORE UPDATE trigger enforces transitions and immutable columns. |
-| `checkins` | `id`, `patient_id`, `mood`, `note`, `phq9_answers`, `gad7_answers`, `phq9_score`, `gad7_score`, `created_at` | `mood 1..5`; arrays exactly 9 / 7 values in `0..3`. Trigger **recomputes** scores from answers on INSERT/UPDATE; client-supplied scores are overwritten or discarded. No UPDATE policy. |
-| `conversations` | `id`, `patient_id`, `created_at` | Append-only for clients. |
-| `messages` | `id`, `conversation_id`, `patient_id`, `sender`, `content`, `created_at`, `prompt_version`, `model` | `sender in ('user','assistant')`; `content 1..2000` via the API schema (DB check allows up to 8000). Trigger enforces `patient_id` matches the conversation owner. Clients may insert only `sender='user'`. Migration 0012 requires `prompt_version` and `model` on every assistant row. |
-| `risk_events` | `id`, `patient_id`, `message_id`, `level`, `reason`, `status`, `reviewed_by`, `reviewed_at`, `created_at` | `level in (low,elevated,high)`; `status in (new,acknowledged,resolved)`. Trigger sets `reviewed_by`/`reviewed_at`: `new` ⇒ both null, otherwise reviewer pinned to actor. Client INSERT/DELETE denied. |
-| `clinician_notes` | `id`, `psychologist_id`, `patient_id`, `note`, `created_at` | `note 1..8000`; no self-notes. Author-only CRUD while an active link exists. Patients have no access. |
-| `audit_log` | `id`, `actor_id`, `action`, `target_patient_id`, `created_at` | `action 1..100`. Append-only via API; identity FKs use `ON DELETE SET NULL`. |
+### `psychologist_profiles`
 
-## Consent state machine
+Primary key `user_id`, a cascade FK to `profiles.id`. `license_no` is 1–64
+characters. `verified` defaults to `false`; only trusted SQL/service-role
+actors can change it. `verified_at` records the manual verification time.
 
-```
-pending ──accept (psychologist only)──> active
-   │                                      │
-   └──decline (either party)──> revoked <──┘ end (either party)
-                                   │
-                              terminal / immutable
-```
+### `care_links`
 
-`share_scope` changes **separately** from status and **only by the patient**.
-`invite_psychologist()` sets `consented_at = now()` at invite time; the link is
-still `pending`, so no data flows until acceptance. Only `active` links grant
-access, and only to a `verified` psychologist.
+A consent-based pair of patient and psychologist profiles. Status is
+`pending`, `active`, or `revoked`; scope is `summary_only` or `full`.
+`consented_at` records when the invitation was created; `revoked_at` is
+required when status is `revoked`. No self-links are allowed. A unique partial
+index allows at most one live (`pending`/`active`) link per pair; a revoked
+link can be replaced by a new invitation.
 
-## Computed PHQ-9 / GAD-7 scores
+`care_links_before_update()` enforces: psychologist-only acceptance, revocation
+by either party, patient-only scope changes, separate scope/status changes,
+and a fully frozen row after revocation.
 
-`checkins_compute_scores()` (BEFORE INSERT OR UPDATE) sums the answer arrays:
+### `checkins`
 
-- `phq9_score = sum(phq9_answers)` (9 answers, each `0..3`, range `0..27`)
-- `gad7_score = sum(gad7_answers)` (7 answers, each `0..3`, range `0..21`)
+Patient-owned mood entries. `mood` is 1–5. A note is optional and capped at
+4000 characters. `phq9_answers`, when present, must contain exactly nine
+integers from 0 to 3; `gad7_answers` must contain exactly seven. Scores are
+recomputed by `checkins_compute_scores()` from the raw answers on insert; a
+client-supplied score is overwritten, and there is no `UPDATE` policy.
 
-Values outside `0..3` raise an exception; a client-supplied score is never
-trusted (test 13).
+### `conversations` and `messages`
 
-## Indexes used by policies
+A conversation belongs to one patient. Messages carry `conversation_id` and a
+denormalized `patient_id`; `messages_check_conversation()` requires the
+patient to match the conversation owner. `sender` is `user` or `assistant`,
+and `content` is 1–8000 characters. Patients insert only `user` rows; the API
+writes `assistant` rows with the service role. Assistant rows must carry both
+`prompt_version` and `model`; user rows must not.
 
-| Table | Index |
+### `risk_events`
+
+Created by the API with the service role only, never by a client. `level` is a
+triage label (`low`, `elevated`, or `high`) and `reason` is a short category
+label, never message text. `message_id` is nullable (`ON DELETE SET NULL`).
+Status is `new`, `acknowledged`, or `resolved`; reviewed events must carry both
+`reviewed_by` and `reviewed_at`, while new events must carry neither.
+`risk_events_before_write()` pins `reviewed_by` to the authenticated reviewer.
+
+### `clinician_notes`
+
+Private notes written by a psychologist about a linked patient, 1–8000
+characters. There is deliberately no patient `SELECT` policy. The author can
+read/write/delete only while an active care link exists.
+
+### `audit_log`
+
+Append-only through the API. `actor_id` must equal `auth.uid()` on insert.
+Rows can be read by the actor and by the patient target. Both FK columns use
+`ON DELETE SET NULL`, and no client has `UPDATE` or `DELETE`.
+`delete_my_data()` anonymizes identity columns and leaves one identity-free
+`data_deleted` marker.
+
+## Functions and triggers
+
+| Object | Purpose |
 |---|---|
-| `profiles` | PK `id` (policy predicate `id = auth.uid()`) |
-| `psychologist_profiles` | PK `user_id` |
-| `care_links` | `patient_id`, `psychologist_id`, unique live pair |
-| `checkins` | `(patient_id, created_at desc)` |
-| `conversations` | `patient_id` |
-| `messages` | `(patient_id, created_at)`, `(conversation_id, created_at)` |
-| `risk_events` | `(patient_id, created_at desc)`, `message_id`, `reviewed_by` |
-| `clinician_notes` | `(psychologist_id, patient_id)`, `patient_id` |
-| `audit_log` | `(actor_id, created_at desc)`, `(target_patient_id, created_at desc)` |
+| `handle_new_user()` | Creates `profiles`, resolves role, region, and Phase 5 consent metadata; creates an unverified psychologist profile when applicable. `SECURITY DEFINER`, `search_path = ''`. |
+| `handle_user_role_update()` | Reconciles role after GoTrue patches `app_metadata` in a later UPDATE. `SECURITY DEFINER`, `search_path = ''`. |
+| `profiles_before_update()` | Immutable fields; region normalization; consent immutability. |
+| `care_links_before_update()` | Status/scope transition rules. |
+| `checkins_compute_scores()` | Recomputes PHQ-9/GAD-7 totals from answers. |
+| `messages_check_conversation()` | Enforces conversation ownership. |
+| `risk_events_before_write()` | Pins reviewer fields to the actor. |
+| `is_verified_psychologist()` | Server-side verification check used by policies. |
+| `has_active_link(patient)` | Verified psychologist plus active link check. |
+| `link_scope(patient)` | Returns `full` only for a verified, actively linked psychologist. |
+| `invite_psychologist(email, scope)` | Generic response; creates a pending link only for a verified psychologist. |
+| `shared_checkins(patient)` | Active-link check-in view; raw answers/notes only for `full` scope. |
+| `record_patient_access(patient, action)` | Appends an audit row for clinician reads. |
+| `delete_my_data()` | Patient-triggered removal of messages, check-ins, links, notes, and risk events; anonymizes audit rows. |
 
-## RPCs
+All `SECURITY DEFINER` functions pin `search_path = ''` and use fully qualified
+names. `EXECUTE` is revoked from `PUBLIC`/`anon` and granted only where needed.
 
-| Function | Purpose |
-|---|---|
-| `invite_psychologist(email, share_scope)` | Patient-only, anti-enumeration invite to a **verified** psychologist. |
-| `shared_checkins(patient)` | Scope-aware check-in read for verified psychologists with an active link. |
-| `record_patient_access(patient, action)` | Audit append for every psychologist data view. |
-| `delete_my_data()` | Patient-only data deletion; keeps profile/account, anonymizes audit rows. The account itself is removed by `DELETE /account` with the service role. |
-| `link_scope(patient)` | Helper (migration 0008) returning the caller's active `share_scope`, else `NULL`; used by policies and the psychologist API. |
+## Consent visibility
 
-All are `SECURITY DEFINER`, `set search_path = ''`, fully qualified, and have
-EXECUTE revoked from `public`/`anon`.
-
-## Deliberately absent
-
-- No SQLite, no `.db` file, no auto-seeded sample data outside `supabase/seed.sql`.
-- No wellness score, no synthetic mood chart, no diagnosis, no medication advice.
-- No outbound email/SMS. Risk is stored as a `risk_events` row for the psychologist queue.
-- Account deletion is implemented in Phase 3: `DELETE /account` calls
-  `delete_my_data()` with the user's JWT, then removes the auth user with the
-  service role. See `RISK.md` for the triage design and `TODO.md` for handoff work.
+Consent columns belong to the patient's own `profiles` row. They are not used
+as an authorization signal and are not exposed to psychologists through any
+care-link RPC. The care-link `share_scope` remains the only control for how
+much check-in detail a linked psychologist can see.

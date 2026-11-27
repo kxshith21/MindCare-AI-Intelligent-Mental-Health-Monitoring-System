@@ -21,6 +21,9 @@ class Settings(BaseSettings):
     # Supabase Auth (JWT verification)
     supabase_url: str = ""
     supabase_jwks_url: str = ""
+    # Service role key — server-side only, used by /auth/psychologist-signup.
+    # Never sent to the browser and never logged.
+    supabase_service_role_key: str = ""
 
     # CORS for the Next.js dev server / deployed web app
     cors_origins: str = "http://localhost:3000"

@@ -128,11 +128,8 @@ def extract_role(claims: dict) -> Role | None:
     `user_metadata` is client-writable and is deliberately ignored: a user
     could otherwise edit their own metadata to claim the psychologist role.
     Supabase's built-in top-level `role` claim is always "authenticated".
-
-    TODO(Phase 2): signup must not let clients self-assign the psychologist
-    role. The role must be written server-side (Supabase admin API / auth
-    hook) into `app_metadata` at account creation; client-supplied
-    `user_metadata.role` must never grant access.
+    The psychologist role is assigned only server-side at signup (see
+    `POST /auth/psychologist-signup`), never from client-writable metadata.
     """
     app_metadata = claims.get("app_metadata") or {}
     candidate = app_metadata.get("role")
